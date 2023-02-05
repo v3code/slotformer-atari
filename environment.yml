@@ -216,4 +216,5 @@ dependencies:
     - widgetsnbextension==4.0.3
     - yarl==1.8.1
     - zipp==3.9.0
+    - typed-argument-parser==1.7.2
 

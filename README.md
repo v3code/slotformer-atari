@@ -1,3 +1,5 @@
+# Based on this repo https://github.com/pairlab/SlotFormer
+
 # SlotFormer
 
 [**SlotFormer: Unsupervised Visual Dynamics Simulation with Object-Centric Models**](https://slotformer.github.io/)<br/>
