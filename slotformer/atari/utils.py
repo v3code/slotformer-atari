@@ -56,7 +56,7 @@ def construct_blacklist(
     for path in black_list_folders:
         for dir_it in os.scandir(path):
             if dir_it.is_dir():
-                file_path = os.path.join(dir_it.path, STATE_TEMPLATE)
+                file_path = os.path.join(dir_it.path, STATE_IDS_TEMPLATE)
                 state_ids = load_state_id_from_path(file_path)
                 blacklist.add(state_ids[0].tobytes())
 
