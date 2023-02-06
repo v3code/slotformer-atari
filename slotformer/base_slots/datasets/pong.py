@@ -63,7 +63,7 @@ class PongDataset(Dataset):
 
     def get_video(self, video_idx):
         folder = self.files[video_idx]
-        num_frames = (self.video_len + 1) // self.frame_offset
+        num_frames = self.video_len // self.frame_offset
         filename = osp.join(folder, 's_t_{}.png')
         frames = [
             Image.open(filename.format(1 +
@@ -185,7 +185,7 @@ def build_pong_dataset(params, val_only=False):
     args = dict(
         data_root=params.data_root,
         split='val',
-        obj3d_transform=BaseTransforms(params.resolution),
+        pong_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
@@ -205,7 +205,7 @@ def build_pong_slots_dataset(params, val_only=False):
         data_root=params.data_root,
         video_slots=slots['val'],
         split='val',
-        obj3d_transform=BaseTransforms(params.resolution),
+        pong_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
