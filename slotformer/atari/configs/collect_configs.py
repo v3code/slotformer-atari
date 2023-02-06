@@ -41,7 +41,7 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
         return BaseCollectConfig(
             min_burnin=50,
             max_burnin=300,
-            save_path=Path(f'data/pong/{split}'),
+            save_path=Path(f'data/spinv/{split}'),
             a3c_weights='pretrained/a3c-spinv/',
             blacklist_paths=blacklist_paths,
             crop=(30, 210),
