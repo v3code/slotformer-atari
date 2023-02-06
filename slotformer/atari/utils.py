@@ -14,7 +14,8 @@ from torch import nn
 from skimage.transform import resize
 
 from slotformer.atari.constants import Environments, STATE_IDS_TEMPLATE, \
-    STATE_FOLDER_TEMPLATE, STATE_TEMPLATE, ACTIONS_TEMPLATE
+    STATE_FOLDER_TEMPLATE, STATE_TEMPLATE, ACTIONS_TEMPLATE, \
+    STATE_IDS_FOLDER_TEMPLATE, ACTIONS_FOLDER_TEMPLATE
 
 
 def get_environment(env_str: Environments) -> gym.Env:
@@ -53,22 +54,26 @@ def construct_blacklist(
         return blacklist
 
     for path in black_list_folders:
-        state_ids = load_state_ids(path)
-
-        for state_steps in state_ids:
-            blacklist.add(state_steps[0].tobytes())
+        for dir_it in os.scandir(path):
+            if dir_it.is_dir():
+                file_path = os.path.join(dir_it.path, STATE_TEMPLATE)
+                state_ids = load_state_id_from_path(file_path)
+                blacklist.add(state_ids[0].tobytes())
 
     return blacklist
 
 
-def load_state_ids(path: Path) -> np.ndarray:
-    load_path = os.path.join(path, STATE_IDS_TEMPLATE)
-    print(load_path)
+def load_state_id_from_path(load_path: Union[Path, str]) -> np.ndarray:
     if not os.path.isfile(load_path):
         raise ValueError("State ids not found.")
     with open(load_path, "rb") as f:
         state_ids = pickle.load(f)
     return state_ids
+
+
+def load_state_ids(path: Union[Path, bytes, str], episode: int) -> np.ndarray:
+    load_path = os.path.join(path, STATE_IDS_FOLDER_TEMPLATE.format(episode))
+    return load_state_id_from_path(load_path)
 
 
 def delete_episode_observations(save_path: Path, episode: int):
@@ -102,14 +107,27 @@ def save_obs(ep: int, step: int, obs: np.ndarray, save_path: Path):
 def save_actions(actions: List[Union[np.ndarray, int]],
                  ep_index: int,
                  save_path: Path):
-    save_path = os.path.join(save_path, ACTIONS_TEMPLATE.format(ep_index))
+    save_path = os.path.join(save_path, ACTIONS_FOLDER_TEMPLATE.format(ep_index))
     maybe_create_dirs(get_dir_name(save_path))
     with open(save_path, "wb") as f:
         pickle.dump(actions, f)
 
 
-def save_state_ids(state_ids: List[np.ndarray], ep_idx: int, save_path: Path):
-    save_path = os.path.join(save_path, STATE_IDS_TEMPLATE.format(ep_idx))
+def load_action_from_path(load_path: Union[Path, str]) -> np.ndarray:
+    if not os.path.isfile(load_path):
+        raise ValueError("Actions not found.")
+    with open(load_path, "rb") as f:
+        actions = pickle.load(f)
+    return actions
+
+
+def load_actions(path: Union[Path, str, bytes], episode: int):
+    load_path = os.path.join(path, ACTIONS_FOLDER_TEMPLATE.format(episode))
+    return load_action_from_path(load_path)
+
+
+def save_state_ids(state_ids: List[np.ndarray], ep_idx: int, save_path: Union[Path, str, bytes]):
+    save_path = os.path.join(save_path, STATE_IDS_FOLDER_TEMPLATE.format(ep_idx))
     maybe_create_dirs(get_dir_name(save_path))
     with open(save_path, "wb") as f:
         pickle.dump(state_ids, f)

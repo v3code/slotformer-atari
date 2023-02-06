@@ -1,7 +1,7 @@
 import argparse
 import copy
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 import numpy as np
 import torch
@@ -22,6 +22,7 @@ class AtariCollectArgs(Tap):
     steps: int = 50
     seed: int = 42
     episodes: int = 1000
+    split: Literal['train', 'test', 'val'] = 'train'
     black_list: Optional[List[Path]] = None
     device: Optional[str] = None
 
@@ -34,7 +35,7 @@ class AtariCollectArgs(Tap):
 def collect(args: AtariCollectArgs):
     env = get_environment(args.environment)
     init_lib_seed(args.seed)
-    collect_config = get_collect_config(args.environment)
+    collect_config = get_collect_config(args.environment, args.split)
     a3c_config = get_a3c_config(args.environment)
     model = get_model(args.environment, collect_config.a3c_weights)
     if args.device is None:
