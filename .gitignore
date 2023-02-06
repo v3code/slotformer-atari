@@ -1,5 +1,7 @@
 vis/
 wandb/
+data/pong
+data/spinv
 data/OBJ3D
 data/CLEVRER
 data/Physion

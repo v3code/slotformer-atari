@@ -21,8 +21,10 @@ from slotformer.atari.constants import Environments, STATE_IDS_TEMPLATE, \
 def get_environment(env_str: Environments) -> gym.Env:
     if env_str == Environments.PONG:
         return gym.make("PongDeterministic-v4")
+    elif env_str == Environments.SPACE_INVADERS:
+        return gym.make("SpaceInvadersDeterministic-v4")
     else:
-        raise NotImplementedError("Environment is not supported")
+        raise NotImplementedError(f"Environment {env_str} is not supported")
 
 
 def init_lib_seed(seed: int):
