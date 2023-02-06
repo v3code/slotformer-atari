@@ -22,11 +22,11 @@ class BaseCollectConfig:
 def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']) -> BaseCollectConfig:
     assert split in ['train', 'test', 'val']
     blacklist_paths = []
+    if split != 'train':
+        blacklist_paths.append(Path(f'data/${env}/train'))
+        if split == 'test':
+            blacklist_paths.append(Path(f'data/${env}/val'))
     if env == Environments.PONG:
-        if split != 'train':
-            blacklist_paths.append(Path('data/pong/train'))
-            if split == 'test':
-                blacklist_paths.append(Path('data/pong/val'))
         return BaseCollectConfig(
             min_burnin=50,
             max_burnin=100,
@@ -34,6 +34,17 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
             a3c_weights='pretrained/a3c-pong/',
             blacklist_paths=blacklist_paths,
             crop=(32, 195),
+            size=(64, 64),
+            eps=0.5
+        )
+    elif env == Environments.SPACE_INVADERS:
+        return BaseCollectConfig(
+            min_burnin=50,
+            max_burnin=300,
+            save_path=Path(f'data/pong/{split}'),
+            a3c_weights='pretrained/a3c-spinv/',
+            blacklist_paths=blacklist_paths,
+            crop=(30, 210),
             size=(64, 64),
             eps=0.5
         )

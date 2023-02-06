@@ -4,7 +4,8 @@ from .physion import build_physion_dataset, build_physion_slots_dataset, \
     build_physion_slots_label_dataset
 from .phyre import build_phyre_dataset, build_phyre_slots_dataset, \
     build_phyre_rollout_slots_dataset
-
+from .pong import build_pong_dataset, build_pong_slots_dataset
+from .spinv import build_spinv_slots_dataset, build_spinv_dataset
 
 def build_dataset(params, val_only=False):
     dst = params.dataset
