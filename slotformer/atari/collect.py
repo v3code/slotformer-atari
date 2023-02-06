@@ -14,7 +14,7 @@ from slotformer.atari.constants import Environments
 from slotformer.atari.models.factory import get_model
 from slotformer.atari.utils import get_environment, init_lib_seed, \
     construct_blacklist, crop_normalize, check_duplication, save_actions, \
-    save_state_ids, save_obs, reset_rnn_state, select_action, preprocess_state
+    save_state_ids, save_obs, reset_rnn_state, select_action, preprocess_state, delete_episode_observations
 
 
 class AtariCollectArgs(Tap):
@@ -79,7 +79,7 @@ def collect(args: AtariCollectArgs):
                 if after_warmup:
                     after_warmup = False
                     if check_duplication(blacklist, state):
-                        continue
+                        break
 
                 if collect_config.crop:
                     obs = crop_normalize(obs, collect_config.crop)
@@ -97,7 +97,8 @@ def collect(args: AtariCollectArgs):
 
                 if done:
                     if step_idx < args.steps:
-                        continue
+                        delete_episode_observations(collect_config.save_path, ep_idx)
+                        break
                     save_actions(episode_actions, ep_idx, collect_config.save_path)
                     save_state_ids(episode_states, ep_idx, collect_config.save_path)
                     ep_idx += 1
