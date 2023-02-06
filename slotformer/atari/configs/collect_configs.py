@@ -23,9 +23,9 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
     assert split in ['train', 'test', 'val']
     blacklist_paths = []
     if split != 'train':
-        blacklist_paths.append(Path(f'data/${env}/train'))
+        blacklist_paths.append(Path(f'data/{env}/train'))
         if split == 'test':
-            blacklist_paths.append(Path(f'data/${env}/val'))
+            blacklist_paths.append(Path(f'data/{env}/val'))
     if env == Environments.PONG:
         return BaseCollectConfig(
             min_burnin=50,

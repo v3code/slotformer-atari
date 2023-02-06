@@ -37,8 +37,8 @@ class SlotFormerParams(BaseParams):
     # Slot Attention
     slot_dict = dict(
         num_slots=5,
-        slot_size=128,
-        slot_mlp_size=256,
+        slot_size=64,
+        slot_mlp_size=128,
         num_iterations=2,
     )
 
