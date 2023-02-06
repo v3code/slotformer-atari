@@ -96,6 +96,8 @@ def collect(args: AtariCollectArgs):
                     done = True
 
                 if done:
+                    if step_idx < args.steps:
+                        continue
                     save_actions(episode_actions, ep_idx, collect_config.save_path)
                     save_state_ids(episode_states, ep_idx, collect_config.save_path)
                     ep_idx += 1
