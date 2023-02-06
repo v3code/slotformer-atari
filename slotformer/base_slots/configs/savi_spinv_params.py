@@ -52,7 +52,7 @@ class SlotFormerParams(BaseParams):
 
     # CNN Decoder
     dec_dict = dict(
-        dec_channels=(128, 64, 64, 64, 64),
+        dec_channels=(64, 64, 64, 64, 64),
         dec_resolution=(8, 8),
         dec_ks=5,
         dec_norm='',
