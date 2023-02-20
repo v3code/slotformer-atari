@@ -50,7 +50,7 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
         )
     elif env == Environments.CRAFTER:
         return BaseCollectConfig(
-            min_burnin=100,
+            min_burnin=10,
             max_burnin=500,
             save_path=Path(f'data/crafter/{split}'),
             blacklist_paths=blacklist_paths,

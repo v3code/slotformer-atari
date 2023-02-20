@@ -63,7 +63,6 @@ def collect(args: CollectArgs):
                 if after_warmup:
                     action = 0
                 else:
-                    # select random action
                     action = agent.get_action(prev_obs)
 
                 step_state = env.step(action)
@@ -89,8 +88,11 @@ def collect(args: CollectArgs):
                 episode_actions.append(action)
                 step_idx += 1
                 save_obs(
-                    ep_idx, step_idx,
-                    obs, collect_config.save_path
+                    ep_idx,
+                    step_idx,
+                    obs,
+                    collect_config.save_path,
+                    atari_env,
                 )
                 if state:
                     episode_states.append(state)

@@ -31,7 +31,7 @@ def get_environment(env_str: Environments) -> gym.Env:
     elif env_str == Environments.SPACE_INVADERS:
         return gym.make("SpaceInvadersDeterministic-v4")
     elif env_str == Environments.CRAFTER:
-        return gym.make("CrafterNoReward-v1", apply_api_compatibility=True)
+        return gym.make("CrafterReward-v1", apply_api_compatibility=True)
     else:
         raise NotImplementedError(f"Environment {env_str} is not supported")
 
@@ -106,11 +106,12 @@ def clear_blacklist(blacklist: Set[bytes], episode_states: np.ndarray):
         blacklist.remove(state.tobytes())
 
 
-def save_obs(ep: int, step: int, obs: np.ndarray, save_path: Path):
+def save_obs(ep: int, step: int, obs: np.ndarray, save_path: Path, normalized=True):
     save_path = os.path.join(save_path,
                              STATE_TEMPLATE.format(ep, step))
     maybe_create_dirs(get_dir_name(save_path))
-    obs = np.round(obs * 225).astype('uint8')
+    if normalized:
+        obs = np.round(obs * 225).astype('uint8')
     image = Image.fromarray(obs)
     image.save(save_path)
 
