@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from nerv.utils import glob_all, load_obj
 
 from .utils import BaseTransforms, ContrastTransforms
-from ...atari.utils import load_actions, load_state_ids
+from ...rl.utils import load_actions, load_state_ids
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 

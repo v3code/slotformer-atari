@@ -1,5 +1,6 @@
 import os
 import pickle
+import crafter
 import shutil
 from pathlib import Path
 from typing import Tuple, Optional, List, Set, Union, AnyStr
@@ -13,9 +14,15 @@ from PIL import Image
 from torch import nn
 from skimage.transform import resize
 
-from slotformer.atari.constants import Environments, STATE_IDS_TEMPLATE, \
+from slotformer.rl.constants import Environments, STATE_IDS_TEMPLATE, \
     STATE_FOLDER_TEMPLATE, STATE_TEMPLATE, ACTIONS_TEMPLATE, \
     STATE_IDS_FOLDER_TEMPLATE, ACTIONS_FOLDER_TEMPLATE
+
+
+def get_torch_device(device_option: Optional[str]) -> torch.device:
+    if device_option is None:
+        device_option = 'cuda' if torch.cuda.is_available() else 'cpu'
+    return torch.device(device_option)
 
 
 def get_environment(env_str: Environments) -> gym.Env:
@@ -23,6 +30,8 @@ def get_environment(env_str: Environments) -> gym.Env:
         return gym.make("PongDeterministic-v4")
     elif env_str == Environments.SPACE_INVADERS:
         return gym.make("SpaceInvadersDeterministic-v4")
+    elif env_str == Environments.CRAFTER:
+        return gym.make("CrafterNoReward-v1", apply_api_compatibility=True)
     else:
         raise NotImplementedError(f"Environment {env_str} is not supported")
 

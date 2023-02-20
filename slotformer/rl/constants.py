@@ -5,6 +5,7 @@ import os
 class Environments(str, enum.Enum):
     PONG = "pong"
     SPACE_INVADERS = "spinv"
+    CRAFTER = "crafter"
 
 
 STATE_FOLDER_TEMPLATE = "e_{:d}"

@@ -1,5 +1,6 @@
 vis/
 wandb/
+data/crafter
 data/pong
 data/spinv
 data/OBJ3D

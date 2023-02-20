@@ -8,19 +8,19 @@ from torch.utils.data import Dataset
 
 from nerv.utils import glob_all, load_obj
 
-from .utils import BaseTransforms
+from .utils import BaseTransforms, ContrastTransforms
 from ...rl.utils import load_actions, load_state_ids
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-class SpaceInvadersDataset(Dataset):
+class CrafterDataset(Dataset):
 
     def __init__(
         self,
         data_root,
         split,
-        spinv_transform,
+        crafter_transform,
         n_sample_frames=6,
         frame_offset=None,
         video_len=50,
@@ -29,7 +29,7 @@ class SpaceInvadersDataset(Dataset):
         assert split in ['train', 'val', 'test']
         self.data_root = os.path.join(data_root, split)
         self.split = split
-        self.spinv_transform = spinv_transform
+        self.crafter_transform = crafter_transform
         self.n_sample_frames = n_sample_frames
         self.frame_offset = frame_offset
         self.video_len = video_len
@@ -52,7 +52,7 @@ class SpaceInvadersDataset(Dataset):
                                        n * self.frame_offset)).convert('RGB')
             for n in range(self.n_sample_frames)
         ]
-        frames = [self.spinv_transform(img) for img in frames]
+        frames = [self.crafter_transform(img) for img in frames]
         return torch.stack(frames, dim=0)  # [N, C, H, W]
 
     def _read_bboxes(self, idx):
@@ -70,7 +70,7 @@ class SpaceInvadersDataset(Dataset):
                                        n * self.frame_offset)).convert('RGB')
             for n in range(num_frames)
         ]
-        frames = [self.spinv_transform(img) for img in frames]
+        frames = [self.crafter_transform(img) for img in frames]
         return {
             'video': torch.stack(frames, dim=0),
             'data_idx': video_idx,
@@ -119,14 +119,14 @@ class SpaceInvadersDataset(Dataset):
         return len(self.valid_idx)
 
 
-class SpaceInvadersSlotsDataset(SpaceInvadersDataset):
+class CrafterSlotsDataset(CrafterDataset):
 
     def __init__(
         self,
         data_root,
         video_slots,
         split,
-        spinv_transform,
+        crafter_transform,
         n_sample_frames=16,
         frame_offset=None,
         video_len=50,
@@ -134,7 +134,7 @@ class SpaceInvadersSlotsDataset(SpaceInvadersDataset):
         super().__init__(
             data_root=data_root,
             split=split,
-            spinv_transform=spinv_transform,
+            crafter_transform=crafter_transform,
             n_sample_frames=n_sample_frames,
             frame_offset=frame_offset,
             video_len=video_len,
@@ -180,40 +180,40 @@ class SpaceInvadersSlotsDataset(SpaceInvadersDataset):
         return data_dict
 
 
-def build_spinv_dataset(params, val_only=False):
+def build_pong_dataset(params, val_only=False):
     """Build Pong video dataset."""
     args = dict(
         data_root=params.data_root,
         split='val',
-        spinv_transform=BaseTransforms(params.resolution),
+        crafter_transform=ContrastTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
     )
-    val_dataset = SpaceInvadersDataset(**args)
+    val_dataset = CrafterDataset(**args)
     if val_only:
         return val_dataset
     args['split'] = 'train'
-    train_dataset = SpaceInvadersDataset(**args)
+    train_dataset = CrafterDataset(**args)
     return train_dataset, val_dataset
 
 
-def build_spinv_slots_dataset(params, val_only=False):
+def build_pong_slots_dataset(params, val_only=False):
     """Build Pong video dataset with pre-computed slots."""
     slots = load_obj(params.slots_root)
     args = dict(
         data_root=params.data_root,
         video_slots=slots['val'],
         split='val',
-        spinv_transform=BaseTransforms(params.resolution),
+        crafter_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
     )
-    val_dataset = SpaceInvadersSlotsDataset(**args)
+    val_dataset = CrafterSlotsDataset(**args)
     if val_only:
         return val_dataset
     args['split'] = 'train'
     args['video_slots'] = slots['train']
-    train_dataset = SpaceInvadersSlotsDataset(**args)
+    train_dataset = CrafterSlotsDataset(**args)
     return train_dataset, val_dataset

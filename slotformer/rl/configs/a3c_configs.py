@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from slotformer.atari.constants import Environments
-from slotformer.atari.utils import raise_env_not_implemented_error
+from slotformer.rl.constants import Environments
+from slotformer.rl.utils import raise_env_not_implemented_error
 
 
 @dataclass
