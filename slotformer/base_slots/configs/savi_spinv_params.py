@@ -5,7 +5,7 @@ class SlotFormerParams(BaseParams):
     project = 'SlotFormer'
 
     # training settings
-    gpus = 4  # 2 GPUs should also be good
+    gpus = 1  # 2 GPUs should also be good
     max_epochs = 40  # ~80k steps
     save_interval = 0.2  # save every 0.2 epoch
     eval_interval = 2  # evaluate every 2 epochs
@@ -21,13 +21,13 @@ class SlotFormerParams(BaseParams):
 
     # data settings
     dataset = 'spinv'
-    data_root = './data/spinv'
+    data_root = 'data/spinv'
     n_sample_frames = 6  # train on video clips of 6 frames
     frame_offset = 1  # no offset
     video_len = 50  # take the first 50 frames of each video
-    train_batch_size = 64 // gpus
-    val_batch_size = train_batch_size * 2
-    num_workers = 8
+    train_batch_size = 64
+    val_batch_size = 64
+    num_workers = 1
 
     # model configs
     model = 'StoSAVi'  # we actually use the deterministic version here

@@ -113,11 +113,13 @@ class STEVE(StoSAVi):
         ),
         loss_dict=dict(
             use_img_recon_loss=False,  # dVAE decoded img recon loss
+            use_slots_correlation_loss=False,
+            use_cossine_similarity_loss=False,
         ),
         eps=1e-6,
     ):
         BaseModel.__init__(self)
-
+        
         self.resolution = resolution
         self.clip_len = clip_len
         self.eps = eps
@@ -194,6 +196,9 @@ class STEVE(StoSAVi):
     def _build_loss(self):
         """Loss calculation settings."""
         self.use_img_recon_loss = self.loss_dict['use_img_recon_loss']
+        self.use_slots_correlation_loss = self.loss_dict['use_slots_correlation_loss']
+        self.use_cossine_similarity_loss = self.loss_dict['use_cossine_similarity_loss']
+        
 
     def encode(self, img, prev_slots=None):
         """Encode from img to slots."""
@@ -323,6 +328,9 @@ class STEVE(StoSAVi):
             'pred_token_id': pred_token_id,
             'target_token_id': target_token_id,
         })
+        
+        if self.use_slots_correlation_loss or self.use_cossine_similarity_loss:
+            out_dict['slots'] = in_slots
 
         # decode image for loss computing
         if self.use_img_recon_loss:
@@ -335,13 +343,43 @@ class STEVE(StoSAVi):
             out_dict['recon_img'] = recon_img
 
         return out_dict
-
+    
+    def _get_slots_cos_similarity(self, slots):
+        b, slots_num, _ = slots.shape
+        coss_similarity_all_mean = 0
+        for i in range(b):
+            coss_similarity_slots_mean = 0
+            for slot_idx1 in range(slots_num-1):
+                for slot_idx2 in range(1, slots_num):
+                    coss_similarity_slots_mean = (coss_similarity_slots_mean 
+                                                  + torch.abs(torch.cosine_similarity(slots[i, slot_idx1], 
+                                                                                      slots[i, slot_idx2], dim=0))
+                                                  / slots_num)
+            coss_similarity_all_mean = coss_similarity_all_mean + coss_similarity_slots_mean        
+        return coss_similarity_all_mean
+    
+    
+    def _get_slots_correlation(self, slots):
+        b, slots_num, _ = slots.shape
+        corr_matrix = torch.zeros((b, slots_num, slots_num))
+        for i in range(b):
+            corr_matrix[i] = torch.abs(torch.corrcoef(slots[i])) - torch.eye(slots_num).to(slots.device)
+        return corr_matrix.mean()
+    
     def calc_train_loss(self, data_dict, out_dict):
         """Compute loss that are general for SlotAttn models."""
         pred_token_id = out_dict['pred_token_id'].flatten(0, 1)
+        slots = out_dict['slots']
         target_token_id = out_dict['target_token_id'].flatten(0, 1)
         token_recon_loss = F.cross_entropy(pred_token_id, target_token_id)
+        
         loss_dict = {'token_recon_loss': token_recon_loss}
+        if self.use_cossine_similarity_loss:
+            slots_similarity = self._get_slots_cos_similarity(slots)
+            loss_dict['cossine_similarity_loss'] = slots_similarity
+        if self.use_slots_correlation_loss:
+            slots_corr = self._get_slots_correlation(slots)
+            loss_dict['slots_correlation_loss'] = slots_corr
         if self.use_img_recon_loss:
             gt_img = out_dict['gt_img']
             recon_img = out_dict['recon_img']

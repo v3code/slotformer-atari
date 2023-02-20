@@ -75,3 +75,23 @@ def masks_to_boxes_pad(masks, num):
     pres_mask = torch.zeros(num).bool()  # [num]
     pres_mask[:bboxes.shape[0]] = True
     return pad_bboxes, pres_mask
+
+class ContrastTransform:
+    """Rotate by one of the given angles."""
+
+    def __init__(self, contrast):
+        self.contrast = contrast
+
+    def __call__(self, x):
+        return F.adjust_contrast(x, self.contrast)
+
+class ContrastTransforms(BaseTransforms):
+    
+    def __init__(self, resolution, mean=(0.5, ), std=(0.5, ), contrast=3):
+        super().__init__(resolution, mean, std)
+        self.transforms = transforms.Compose([
+            transforms.ToTensor(),  # [3, H, W]
+            ContrastTransform(contrast=contrast),
+            transforms.Normalize(mean, std),  # [-1, 1]
+            transforms.Resize(resolution),
+        ])

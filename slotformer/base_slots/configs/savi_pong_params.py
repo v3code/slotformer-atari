@@ -39,7 +39,7 @@ class SlotFormerParams(BaseParams):
         num_slots=4,  # at most 5 objects per scene
         slot_size=128,
         slot_mlp_size=256,
-        num_iterations=2,
+        num_iterations=6,
     )
 
     # CNN Encoder

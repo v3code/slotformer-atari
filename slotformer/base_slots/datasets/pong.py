@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 from nerv.utils import glob_all, load_obj
 
-from .utils import BaseTransforms
+from .utils import BaseTransforms, ContrastTransforms
 from ...atari.utils import load_actions, load_state_ids
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -185,7 +185,7 @@ def build_pong_dataset(params, val_only=False):
     args = dict(
         data_root=params.data_root,
         split='val',
-        pong_transform=BaseTransforms(params.resolution),
+        pong_transform=ContrastTransforms(params.resolution, contrast=3),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
@@ -205,7 +205,7 @@ def build_pong_slots_dataset(params, val_only=False):
         data_root=params.data_root,
         video_slots=slots['val'],
         split='val',
-        pong_transform=BaseTransforms(params.resolution),
+        pong_transform=ContrastTransforms(params.resolution, contrast=3),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,

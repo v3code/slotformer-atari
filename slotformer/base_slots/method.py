@@ -236,10 +236,12 @@ class STEVEMethod(SlotBaseMethod):
 
     def _configure_optimizers(self):
         """Returns an optimizer, a scheduler and its frequency (step/epoch)."""
-        assert self.params.optimizer.lower() == 'adam'
-        assert self.params.weight_decay <= 0.
+        # assert self.params.optimizer.lower() == 'adam'
+        # assert self.params.weight_decay <= 0.
         lr = self.params.lr
         dec_lr = self.params.dec_lr
+        if self.params.weight_decay is None:
+            self.params.weight_decay = 0.
 
         # STEVE uses different lr for its Transformer decoder and other parts
         sa_params = list(
@@ -259,8 +261,10 @@ class STEVEMethod(SlotBaseMethod):
                 'lr': dec_lr,
             },
         ]
-
-        optimizer = optim.Adam(params_list, lr=lr, weight_decay=0.)
+        if self.params.optimizer.lower() == 'adam':
+            optimizer = optim.Adam(params_list, lr=lr, weight_decay=self.params.weight_decay)
+        else:
+            optimizer = optim.AdamW(params_list, lr=lr, weight_decay=self.params.weight_decay)
 
         total_steps = self.params.max_epochs * len(self.train_loader)
         warmup_steps = self.params.warmup_steps_pct * total_steps
