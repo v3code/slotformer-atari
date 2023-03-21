@@ -1,5 +1,7 @@
 import os
 import os.path as osp
+import pickle
+
 import numpy as np
 from PIL import Image, ImageFile
 
@@ -42,6 +44,16 @@ class ShapesDataset(Dataset):
 
     def _get_video_start_idx(self, idx):
         return self.valid_idx[idx]
+
+    def _read_actions(self, idx):
+        folder, start_idx = self._get_video_start_idx(idx)
+        filename = osp.join(folder, 'actions.pkl') # TODO make better
+        with open(filename) as file:
+            actions = pickle.load(file)
+
+        return actions[start_idx:self.n_sample_frames]
+
+
 
     def _read_frames(self, idx):
         folder, start_idx = self._get_video_start_idx(idx)
@@ -162,14 +174,13 @@ class ShapesSlotsDataset(ShapesDataset):
         """
         slots = self._read_slots(idx)
         frames = self._read_frames(idx)
-        data_path = os.path.join(self.data_root, self.split)
-        # actions = load_actions(data_path, idx)
+        actions = self._read_actions(idx)
         # state_ids = load_state_ids(data_path, idx)
         data_dict = {
             'data_idx': idx,
             'slots': slots,
             'img': frames,
-            # 'actions': actions,
+            'actions': actions,
             # 'state_ids': state_ids,
         }
         if self.split != 'train':

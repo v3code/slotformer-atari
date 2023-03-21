@@ -284,11 +284,11 @@ class SlotFormer(BaseModel):
         # same as SAVi
         return StoSAVi.decode(self, slots)
 
-    def rollout(self, past_slots, pred_len, decode=False, with_gt=True):
+    def rollout(self, past_slots, pred_len, decode=False, with_gt=True, actions=None):
         """Unroll slots for `pred_len` steps, potentially decode images."""
         B = past_slots.shape[0]  # [B, T, N, C]
         pred_slots = self.rollouter(past_slots[:, -self.history_len:],
-                                    pred_len)
+                                    pred_len, actions)
         # `decode` is usually called from outside
         # used to visualize an entire video (burn-in + rollout)
         # i.e. `with_gt` is True
@@ -314,18 +314,19 @@ class SlotFormer(BaseModel):
     def forward(self, data_dict):
         """Forward pass."""
         slots = data_dict['slots']  # [B, T, N, C]
+        actions = data_dict['actions']
         assert self.rollout_len + self.history_len == slots.shape[1], \
             f'wrong SlotFormer training length {slots.shape[1]}'
         past_slots = slots[:, :self.history_len]
         gt_slots = slots[:, self.history_len:]
         if self.use_img_recon_loss:
             out_dict = self.rollout(
-                past_slots, self.rollout_len, decode=True, with_gt=False)
+                past_slots, self.rollout_len, decode=True, with_gt=False, actions=actions)
             out_dict['pred_slots'] = out_dict.pop('slots')
             out_dict['gt_slots'] = gt_slots  # both slots [B, pred_len, N, C]
         else:
             pred_slots = self.rollout(
-                past_slots, self.rollout_len, decode=False)
+                past_slots, self.rollout_len, decode=False, actions=actions)
             out_dict = {
                 'gt_slots': gt_slots,  # both slots [B, pred_len, N, C]
                 'pred_slots': pred_slots,

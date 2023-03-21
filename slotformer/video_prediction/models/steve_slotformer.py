@@ -40,6 +40,10 @@ class STEVESlotFormer(SlotFormer):
                 num_heads=8,
                 ffn_dim=192 * 4,
                 norm_first=True,
+                action_conditioning=False,
+                discrete_actions=True,
+                actions_dim=4,
+                max_discrete_actions=12
             ),
             loss_dict=dict(
                 rollout_len=6,
@@ -102,20 +106,22 @@ class STEVESlotFormer(SlotFormer):
         hard_recon = self.dvae.detokenize(z_hard)
         return soft_recon, hard_recon
 
-    def rollout(self, past_slots, pred_len, decode=False, with_gt=True):
+    def rollout(self, past_slots, pred_len, decode=False, with_gt=True, actions=None):
         """Perform future rollout to `target_len` video."""
         pred_slots = self.rollouter(past_slots[:, -self.history_len:],
-                                    pred_len)
+                                    pred_len, actions)
         return pred_slots
 
     def forward(self, data_dict):
         """Forward pass."""
         slots = data_dict['slots']  # [B, T', N, C]
+        actions = data_dict['actions']
+
         assert self.rollout_len + self.history_len == slots.shape[1], \
             f'wrong SlotFormer training length {slots.shape[1]}'
         past_slots = slots[:, :self.history_len]
         gt_slots = slots[:, self.history_len:]
-        pred_slots = self.rollout(past_slots, self.rollout_len)
+        pred_slots = self.rollout(past_slots, self.rollout_len, actions=actions)
         out_dict = {
             'gt_slots': gt_slots,  # both slots [B, pred_len, N, C]
             'pred_slots': pred_slots,
