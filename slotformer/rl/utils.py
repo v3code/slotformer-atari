@@ -1,6 +1,7 @@
 import os
 import pickle
 import crafter
+import slotformer.rl.envs
 import shutil
 from pathlib import Path
 from typing import Tuple, Optional, List, Set, Union, AnyStr
@@ -25,13 +26,17 @@ def get_torch_device(device_option: Optional[str]) -> torch.device:
     return torch.device(device_option)
 
 
-def get_environment(env_str: Environments) -> gym.Env:
+def get_environment(env_str: Environments, seed=None) -> gym.Env:
     if env_str == Environments.PONG:
-        return gym.make("PongDeterministic-v4")
+        return gym.make("PongDeterministic-v4", seed=seed)
     elif env_str == Environments.SPACE_INVADERS:
-        return gym.make("SpaceInvadersDeterministic-v4")
+        return gym.make("SpaceInvadersDeterministic-v4", seed=seed)
     elif env_str == Environments.CRAFTER:
-        return gym.make("CrafterReward-v1", apply_api_compatibility=True)
+        return gym.make("CrafterReward-v1", apply_api_compatibility=True, seed=seed)
+    elif env_str == Environments.CUBES_3D:
+        return gym.make("Cubes-v0", seed=seed)
+    elif env_str == Environments.SHAPES_2D:
+        return gym.make("Shapes-v0", seed=seed)
     else:
         raise NotImplementedError(f"Environment {env_str} is not supported")
 
@@ -57,7 +62,8 @@ def crop_normalize(img: np.ndarray,
 
 
 def construct_blacklist(
-        black_list_folders: Optional[List[Path]] = None
+        black_list_folders: Optional[List[Path]] = None,
+        is_numpy = False
 ) -> Optional[Set[bytes]]:
     blacklist = set()
 
@@ -69,7 +75,10 @@ def construct_blacklist(
             if dir_it.is_dir():
                 file_path = os.path.join(dir_it.path, STATE_IDS_TEMPLATE)
                 state_ids = load_state_id_from_path(file_path)
-                blacklist.add(state_ids[0].tobytes())
+                first_id = state_ids[0]
+                if not is_numpy:
+                    first_id = np.array(first_id)
+                blacklist.add(first_id.tobytes())
 
     return blacklist
 

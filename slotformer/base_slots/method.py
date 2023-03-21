@@ -8,6 +8,8 @@ import torchvision.utils as vutils
 
 from nerv.training import BaseMethod, CosineAnnealingWarmupRestarts
 
+from nerv.lion import Lion
+
 from .models import cosine_anneal, get_lr, gumbel_softmax, make_one_hot, \
     to_rgb_from_tensor
 
@@ -263,6 +265,8 @@ class STEVEMethod(SlotBaseMethod):
         ]
         if self.params.optimizer.lower() == 'adam':
             optimizer = optim.Adam(params_list, lr=lr, weight_decay=self.params.weight_decay)
+        if self.params.optimizer.lower() == 'lion':
+            optimizer = Lion(params_list, lr=lr, weight_decay=self.params.weight_decay)
         else:
             optimizer = optim.AdamW(params_list, lr=lr, weight_decay=self.params.weight_decay)
 
@@ -290,11 +294,11 @@ class STEVEMethod(SlotBaseMethod):
         # therefore, we only visualize scene decomposition results
         # but don't show the video reconstruction
         # change this if you want to see reconstruction anyways
-        self.recon_video = False
+        self.recon_video = True
         super().validation_epoch(model, san_check_step=san_check_step)
 
     @staticmethod
-    def _make_video(video, soft_video, hard_video):
+    def _make_video(video, soft_video, hard_video, history_len=None):
         """videos are of shape [T, C, H, W]"""
         out = to_rgb_from_tensor(
             torch.stack(
@@ -331,6 +335,25 @@ class STEVEMethod(SlotBaseMethod):
             ) for i in range(video.shape[0])
         ])  # [T, 3, H, (num_slots+1)*W]
         return save_video
+    
+    @staticmethod
+    def _make_masks_video(video, pred_video):
+        """videos are of shape [T, C, H, W]"""
+        out = to_rgb_from_tensor(
+            torch.cat(
+                [
+                    video.unsqueeze(1),  # [T, 1, 3, H, W]
+                    pred_video.unsqueeze(2).expand(-1,-1,3,-1,-1),  # [T, num_slots, 1, H, W]
+                ],
+                dim=1,
+            ))  # [T, num_slots + 1, 3, H, W]
+        save_video = torch.stack([
+            vutils.make_grid(
+                out[i].cpu(),
+                nrow=out.shape[1],
+            ) for i in range(video.shape[0])
+        ])  # [T, 3, H, (num_slots+1)*W]
+        return save_video
 
     @torch.no_grad()
     def _sample_video(self, model):
@@ -341,7 +364,7 @@ class STEVEMethod(SlotBaseMethod):
         sampled_idx = self._get_sample_idx(self.params.n_samples, dst)
         num_patches = model.num_patches
         n = int(num_patches**0.5)
-        results, recon_results = [], []
+        results, recon_results,  masks_result = [], [], []
         for i in sampled_idx:
             video = dst.get_video(i.item())['video'].float().to(self.device)
             data_dict = {'img': video[None]}
@@ -350,7 +373,9 @@ class STEVEMethod(SlotBaseMethod):
             masked_video = video.unsqueeze(1) * masks.unsqueeze(2)
             # [T, num_slots, C, H, W]
             save_video = self._make_slots_video(video, masked_video)
+            masks_video = self._make_masks_video(video, masks)
             results.append(save_video)
+            masks_result.append(masks_video)
             if not self.recon_video:
                 continue
 
@@ -387,7 +412,8 @@ class STEVEMethod(SlotBaseMethod):
             recon_results.append(save_video)
             torch.cuda.empty_cache()
 
-        log_dict = {'val/video': self._convert_video(results)}
+        log_dict = {'val/video': self._convert_video(results),
+                    'val/masks_video': self._convert_video(masks_result)}
         if self.recon_video:
             log_dict['val/recon_video'] = self._convert_video(recon_results)
         wandb.log(log_dict, step=self.it)

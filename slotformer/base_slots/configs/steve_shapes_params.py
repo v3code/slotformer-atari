@@ -16,21 +16,21 @@ class SlotFormerParams(BaseParams):
     # optimizer settings
     # Adam optimizer, Cosine decay with Warmup
     optimizer = 'Lion'
-    weight_decay=1.5    
-    lr = 1e-4  # 1e-4 for the main STEVE model
-    dec_lr = 3e-4  # 3e-4 for the Transformer decoder
+    weight_decay=0.5    
+    lr = 1e-5  # 1e-4 for the main STEVE model
+    dec_lr = 3e-5  # 3e-4 for the Transformer decoder
     clip_grad = 0.08  # following the paper
     warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
 
     # data settings
-    dataset = 'pong'
-    data_root = './data/pong'
+    dataset = 'shapes'
+    data_root = './data/shapes'
     tasks = ['all']  # train on all 8 scenarios
     n_sample_frames = 6  # train on video clips of 6 frames
     frame_offset = 1  # no offset
-    video_len = 50  
-    train_batch_size = 32
-    val_batch_size = 32
+    video_len = 100  
+    train_batch_size = 64
+    val_batch_size = 64
     num_workers = 1
 
     # model configs
@@ -47,11 +47,11 @@ class SlotFormerParams(BaseParams):
         # we don't ablate this `num_slots`, so we are not sure if it will make
         # a huge difference to the results
         # qualitatively, 6 achieves a reasonable scene decomposition result
-        num_slots=4,
+        num_slots=6,
         slot_size=slot_size,
         slot_mlp_size=slot_size * 2,
-        num_iterations=2,
-        slots_init='shared_gaussian',
+        num_iterations=1,
+        slots_init='param',
         truncate='none',
         sigma=1
     )
@@ -59,8 +59,8 @@ class SlotFormerParams(BaseParams):
     # dVAE tokenizer
     dvae_dict = dict(
         down_factor=4,
-        vocab_size=1024,
-        dvae_ckp_path='pretrained/dvae_pong_params/model_20.pth',
+        vocab_size=4096,
+        dvae_ckp_path='checkpoint/dvae_shapes_params/models/epoch/model_20.pth',
     )
 
     # CNN Encoder
@@ -92,7 +92,7 @@ class SlotFormerParams(BaseParams):
 
     # loss settings
     loss_dict = dict(
-        use_img_recon_loss=True,  # additional img recon loss via dVAE decoder
+        use_img_recon_loss=False,  # additional img recon loss via dVAE decoder
         use_slots_correlation_loss=False,
         use_cossine_similarity_loss=False
     )

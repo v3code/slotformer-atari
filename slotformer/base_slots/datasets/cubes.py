@@ -14,13 +14,13 @@ from slotformer.rl.utils import load_actions, load_state_ids
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-class CrafterDataset(Dataset):
+class CubesDataset(Dataset):
 
     def __init__(
         self,
         data_root,
         split,
-        crafter_transform,
+        cubes_transform,
         n_sample_frames=6,
         frame_offset=None,
         video_len=50,
@@ -29,7 +29,7 @@ class CrafterDataset(Dataset):
         assert split in ['train', 'val', 'test']
         self.data_root = os.path.join(data_root, split)
         self.split = split
-        self.crafter_transform = crafter_transform
+        self.cubes_transform = cubes_transform
         self.n_sample_frames = n_sample_frames
         self.frame_offset = frame_offset
         self.video_len = video_len
@@ -45,14 +45,14 @@ class CrafterDataset(Dataset):
 
     def _read_frames(self, idx):
         folder, start_idx = self._get_video_start_idx(idx)
-        start_idx += 1  # files start from 'test_1.png'
+        start_idx += 1  # files start from 'test_0.png'
         filename = osp.join(folder, 's_t_{}.png')
         frames = [
             Image.open(filename.format(start_idx +
                                        n * self.frame_offset)).convert('RGB')
             for n in range(self.n_sample_frames)
         ]
-        frames = [self.crafter_transform(img) for img in frames]
+        frames = [self.cubes_transform(img) for img in frames]
         return torch.stack(frames, dim=0)  # [N, C, H, W]
 
     def _read_bboxes(self, idx):
@@ -66,11 +66,10 @@ class CrafterDataset(Dataset):
         num_frames = self.video_len // self.frame_offset
         filename = osp.join(folder, 's_t_{}.png')
         frames = [
-            Image.open(filename.format(1 +
-                                       n * self.frame_offset)).convert('RGB')
+            Image.open(filename.format(1 + n * self.frame_offset)).convert('RGB')
             for n in range(num_frames)
         ]
-        frames = [self.crafter_transform(img) for img in frames]
+        frames = [self.cubes_transform(img) for img in frames]
         return {
             'video': torch.stack(frames, dim=0),
             'data_idx': video_idx,
@@ -119,14 +118,14 @@ class CrafterDataset(Dataset):
         return len(self.valid_idx)
 
 
-class CrafterSlotsDataset(CrafterDataset):
+class CubesSlotsDataset(CubesDataset):
 
     def __init__(
         self,
         data_root,
         video_slots,
         split,
-        crafter_transform,
+        cubes_transform,
         n_sample_frames=16,
         frame_offset=None,
         video_len=50,
@@ -134,7 +133,7 @@ class CrafterSlotsDataset(CrafterDataset):
         super().__init__(
             data_root=data_root,
             split=split,
-            crafter_transform=crafter_transform,
+            cubes_transform=cubes_transform,
             n_sample_frames=n_sample_frames,
             frame_offset=frame_offset,
             video_len=video_len,
@@ -164,14 +163,14 @@ class CrafterSlotsDataset(CrafterDataset):
         slots = self._read_slots(idx)
         frames = self._read_frames(idx)
         data_path = os.path.join(self.data_root, self.split)
-        actions = load_actions(data_path, idx)
-        state_ids = load_state_ids(data_path, idx)
+        # actions = load_actions(data_path, idx)
+        # state_ids = load_state_ids(data_path, idx)
         data_dict = {
             'data_idx': idx,
             'slots': slots,
             'img': frames,
-            'actions': actions,
-            'state_ids': state_ids,
+            # 'actions': actions,
+            # 'state_ids': state_ids,
         }
         if self.split != 'train':
             bboxes, pres_mask = self._read_bboxes(idx)
@@ -180,40 +179,40 @@ class CrafterSlotsDataset(CrafterDataset):
         return data_dict
 
 
-def build_crafter_dataset(params, val_only=False):
-    """Build Pong video dataset."""
+def build_cubes_dataset(params, val_only=False):
+    """Build Cubes video dataset."""
     args = dict(
         data_root=params.data_root,
         split='val',
-        crafter_transform=ContrastTransforms(params.resolution),
+        cubes_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
     )
-    val_dataset = CrafterDataset(**args)
+    val_dataset = CubesDataset(**args)
     if val_only:
         return val_dataset
     args['split'] = 'train'
-    train_dataset = CrafterDataset(**args)
+    train_dataset = CubesDataset(**args)
     return train_dataset, val_dataset
 
-
-def build_crafter_slots_dataset(params, val_only=False):
-    """Build Pong video dataset with pre-computed slots."""
+    
+def build_cubes_slots_dataset(params, val_only=False):
+    """Build Cubes video dataset with pre-computed slots."""
     slots = load_obj(params.slots_root)
     args = dict(
         data_root=params.data_root,
         video_slots=slots['val'],
         split='val',
-        crafter_transform=BaseTransforms(params.resolution),
+        cubes_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
     )
-    val_dataset = CrafterSlotsDataset(**args)
+    val_dataset = CubesSlotsDataset(**args)
     if val_only:
         return val_dataset
     args['split'] = 'train'
     args['video_slots'] = slots['train']
-    train_dataset = CrafterSlotsDataset(**args)
+    train_dataset = CubesSlotsDataset(**args)
     return train_dataset, val_dataset

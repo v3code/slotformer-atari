@@ -9,6 +9,68 @@ from einops.layers.torch import Rearrange
 from .steve_utils import linear
 
 
+# class LinearAttention(Module):
+#     """Implement unmasked attention using dot product of feature maps in
+#     O(N D^2) complexity.
+#     Given the queries, keys and values as Q, K, V instead of computing
+#         V' = softmax(Q.mm(K.t()), dim=-1).mm(V),
+#     we make use of a feature map function Φ(.) and perform the following
+#     computation
+#         V' = normalize(Φ(Q).mm(Φ(K).t())).mm(V).
+#     The above can be computed in O(N D^2) complexity where D is the
+#     dimensionality of Q, K and V and N is the sequence length. Depending on the
+#     feature map, however, the complexity of the attention might be limited.
+#     Arguments
+#     ---------
+#         feature_map: callable, a callable that applies the feature map to the
+#                      last dimension of a tensor (default: elu(x)+1)
+#         eps: float, a small number to ensure the numerical stability of the
+#              denominator (default: 1e-6)
+#         event_dispatcher: str or EventDispatcher instance to be used by this
+#                           module for dispatching events (default: the default
+#                           global dispatcher)
+#     """
+#     def __init__(self, d_model, dropout=0, eps=1e-6, gain=1.):
+#         super(LinearAttention, self).__init__()
+
+#         self.attn_dropout = nn.Dropout(dropout)
+#         self.output_dropout = nn.Dropout(dropout)
+#         self.proj_q = linear(d_model, d_model, bias=False)
+#         self.proj_k = linear(d_model, d_model, bias=False)
+#         self.proj_v = linear(d_model, d_model, bias=False)
+#         self.proj_o = linear(d_model, d_model, bias=False, gain=gain)
+#         self.eps = eps
+
+        
+
+#     def forward(self, q, k, v, attn_mask=None,):
+#         if attn_mask and not attn_mask.all_ones:
+#             raise RuntimeError(("LinearAttention does not support arbitrary "
+#                                 "attention masks"))
+            
+#         # Apply the feature map to the queries and keys
+#         Q = F.elu(self.proj_q(q)) + 1
+#         K = F.elu(self.proj_k(k)) + 1
+#         V = F.elu(self.proj_v(v)) + 1
+
+#         # Apply the key padding mask and make sure that the attn_mask is
+#         # all_ones
+        
+#         # Compute the KV matrix, namely the dot product of keys and values so
+#         # that we never explicitly compute the attention matrix and thus
+#         # decrease the complexity
+#         KV = torch.einsum("nshd,nshm->nhmd", K, v)
+
+#         # Compute the normalizer
+#         Z = 1/(torch.einsum("nlhd,nhd->nlh", Q, K.sum(dim=1))+self.eps)
+
+#         # Finally compute and return the new values
+#         V = torch.einsum("nlhd,nhmd,nlh->nlhm", Q, KV, Z)
+        
+        
+
+#         return V.contiguous()
+
 class MultiHeadAttention(nn.Module):
 
     def __init__(self, d_model, num_heads, dropout=0., gain=1.):

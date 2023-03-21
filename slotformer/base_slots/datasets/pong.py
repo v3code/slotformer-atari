@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from nerv.utils import glob_all, load_obj
 
 from .utils import BaseTransforms, ContrastTransforms
-from ...rl.utils import load_actions, load_state_ids
+from slotformer.rl.utils import load_actions, load_state_ids
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -164,14 +164,14 @@ class PongSlotsDataset(PongDataset):
         slots = self._read_slots(idx)
         frames = self._read_frames(idx)
         data_path = os.path.join(self.data_root, self.split)
-        actions = load_actions(data_path, idx)
-        state_ids = load_state_ids(data_path, idx)
+        # actions = load_actions(data_path, idx)
+        # state_ids = load_state_ids(data_path, idx)
         data_dict = {
             'data_idx': idx,
             'slots': slots,
             'img': frames,
-            'actions': actions,
-            'state_ids': state_ids,
+            # 'actions': actions,
+            # 'state_ids': state_ids,
         }
         if self.split != 'train':
             bboxes, pres_mask = self._read_bboxes(idx)
@@ -185,7 +185,7 @@ def build_pong_dataset(params, val_only=False):
     args = dict(
         data_root=params.data_root,
         split='val',
-        pong_transform=ContrastTransforms(params.resolution, contrast=3),
+        pong_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,
@@ -205,7 +205,7 @@ def build_pong_slots_dataset(params, val_only=False):
         data_root=params.data_root,
         video_slots=slots['val'],
         split='val',
-        pong_transform=ContrastTransforms(params.resolution, contrast=3),
+        pong_transform=BaseTransforms(params.resolution),
         n_sample_frames=params.n_sample_frames,
         frame_offset=params.frame_offset,
         video_len=params.video_len,

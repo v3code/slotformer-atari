@@ -6,6 +6,8 @@ class Environments(str, enum.Enum):
     PONG = "pong"
     SPACE_INVADERS = "spinv"
     CRAFTER = "crafter"
+    CUBES_3D = 'cubes'
+    SHAPES_2D = 'shapes'
 
 
 STATE_FOLDER_TEMPLATE = "e_{:d}"

@@ -51,8 +51,24 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
     elif env == Environments.CRAFTER:
         return BaseCollectConfig(
             min_burnin=10,
-            max_burnin=500,
+            max_burnin=300,
             save_path=Path(f'data/crafter/{split}'),
+            blacklist_paths=blacklist_paths,
+            size=(64, 64),
+        )
+    elif env == Environments.SHAPES_2D:
+        return BaseCollectConfig(
+            min_burnin=0,
+            max_burnin=0,
+            save_path=Path(f'data/shapes/{split}'),
+            blacklist_paths=blacklist_paths,
+            size=(64, 64),
+        )
+    elif env == Environments.CUBES_3D:
+        return BaseCollectConfig(
+            min_burnin=0,
+            max_burnin=0,
+            save_path=Path(f'data/cubes/{split}'),
             blacklist_paths=blacklist_paths,
             size=(64, 64),
         )

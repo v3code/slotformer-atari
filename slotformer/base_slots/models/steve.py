@@ -16,7 +16,7 @@ class SlotAttentionWMask(SlotAttention):
     We return the last attention map from SA as the segmentation mask.
     """
 
-    def forward(self, inputs, slots):
+    def forward(self, inputs, slots, slots_init):
         """Forward function.
 
         Args:
@@ -41,6 +41,12 @@ class SlotAttentionWMask(SlotAttention):
 
         # Multiple rounds of attention.
         for attn_iter in range(self.num_iterations):
+            if attn_iter == self.num_iterations - 1:
+                if self.truncate == 'bi-level':
+                    slots = slots.detach() + slots_init - slots_init.detach()
+                elif self.truncate == 'fixed-point':
+                    slots = slots.detach()
+            
             slots_prev = slots
 
             # Attention. Shape: [B, num_slots, slot_size].
@@ -85,6 +91,9 @@ class STEVE(StoSAVi):
             slot_size=128,
             slot_mlp_size=256,
             num_iterations=2,
+            slots_init='shared_gaussian',
+            truncate='bi-level',
+            sigma=1
         ),
         dvae_dict=dict(
             down_factor=4,
@@ -102,6 +111,7 @@ class STEVE(StoSAVi):
             dec_num_layers=4,
             dec_num_heads=4,
             dec_d_model=128,
+            atten_type='multihead'
         ),
         pred_dict=dict(
             pred_rnn=True,
@@ -149,11 +159,29 @@ class STEVE(StoSAVi):
         self.slot_size = self.slot_dict['slot_size']
         self.slot_mlp_size = self.slot_dict['slot_mlp_size']
         self.num_iterations = self.slot_dict['num_iterations']
-
-        # directly use learnable embeddings for each slot
-        self.init_latents = nn.Parameter(
-            nn.init.normal_(torch.empty(1, self.num_slots, self.slot_size)))
-
+        self.sa_truncate = self.slot_dict['truncate'] 
+        self.sa_init = self.slot_dict['slots_init'] 
+        self.sa_init_sigma = self.slot_dict['sigma']
+        
+        assert self.sa_init in ['shared_gaussian', 'embedding', 'param', 'embedding_lr_sigma']
+        if self.sa_init == 'shared_gaussian':
+            self.slot_mu = nn.Parameter(torch.zeros(1, 1, self.slot_size))
+            self.slot_log_sigma = nn.Parameter(torch.zeros(1, 1, self.slot_size))
+            nn.init.xavier_uniform_(self.slot_mu)
+            nn.init.xavier_uniform_(self.slot_log_sigma)
+        elif self.sa_init == 'embedding':
+            self.slots_init = nn.Embedding(self.num_slots, self.slot_size)
+            nn.init.xavier_uniform_(self.slots_init.weight)
+        elif self.sa_init == 'embedding_lr_sigma':
+            self.slots_init = nn.Embedding(self.num_slots, self.slot_size)
+            self.sa_init_sigma = nn.Parameter(1)
+            nn.init.xavier_uniform_(self.slots_init.weight)
+        elif self.sa_init == 'param':
+            self.slots_init = nn.Parameter(
+                nn.init.normal_(torch.empty(1, self.num_slots, self.slot_size)))
+        else:
+            raise NotImplementedError
+        
         self.slot_attention = SlotAttentionWMask(
             in_features=self.enc_out_channels,
             num_iterations=self.num_iterations,
@@ -161,6 +189,7 @@ class STEVE(StoSAVi):
             slot_size=self.slot_size,
             mlp_hidden_size=self.slot_mlp_size,
             eps=self.eps,
+            truncate=self.sa_truncate
         )
 
     def _build_dvae(self):
@@ -199,7 +228,6 @@ class STEVE(StoSAVi):
         self.use_slots_correlation_loss = self.loss_dict['use_slots_correlation_loss']
         self.use_cossine_similarity_loss = self.loss_dict['use_cossine_similarity_loss']
         
-
     def encode(self, img, prev_slots=None):
         """Encode from img to slots."""
         B, T = img.shape[:2]
@@ -208,18 +236,30 @@ class STEVE(StoSAVi):
         encoder_out = self._get_encoder_out(img)
         encoder_out = encoder_out.unflatten(0, (B, T))
         # `encoder_out` has shape: [B, T, H*W, out_features]
+        
+        slot_inits = None
 
         # apply SlotAttn on video frames via reusing slots
         all_slots, all_masks = [], []
         for idx in range(T):
+            
             # init
             if prev_slots is None:
-                latents = self.init_latents.repeat(B, 1, 1)  # [B, N, C]
+                if self.sa_init == 'shared_gaussian':
+                    slot_inits = torch.randn(B, self.num_slots, self.slot_size).type_as(encoder_out) * torch.exp(self.slot_log_sigma) + self.slot_mu
+                elif self.sa_init == 'embedding':
+                    mu = self.slots_init.weight.expand(B, -1, -1)
+                    z = torch.randn_like(mu).type_as(encoder_out)
+                    slot_inits = mu + z * self.sa_init_sigma * mu.detach()
+                elif self.sa_init == 'param':
+                    slot_inits = self.slots_init.repeat(B, 1, 1)
+    
+                latents = slot_inits
             else:
                 latents = self.predictor(prev_slots)  # [B, N, C]
 
             # SA to get `post_slots`
-            slots, masks = self.slot_attention(encoder_out[:, idx], latents)
+            slots, masks = self.slot_attention(encoder_out[:, idx], latents, slot_inits)
             all_slots.append(slots)
             all_masks.append(masks.unflatten(-1, self.visual_resolution))
 

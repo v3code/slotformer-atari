@@ -19,12 +19,12 @@ class SlotFormerParams(BaseParams):
     # no weight decay, no gradient clipping
 
     # data settings
-    dataset = 'pong'
-    data_root = './data/pong'
+    dataset = 'shapes'
+    data_root = './data/shapes'
     tasks = ['all']  # train on all 8 scenarios
     n_sample_frames = 1  # train on single frames
     frame_offset = 1  # no offset
-    video_len = 50  # take the first 150 frames of each video
+    video_len = 100  # take the first 150 frames of each video
     train_batch_size = 128
     val_batch_size = 128
     num_workers = 2

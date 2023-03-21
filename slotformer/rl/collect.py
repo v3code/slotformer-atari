@@ -34,18 +34,29 @@ class CollectArgs(Tap):
 
 
 def collect(args: CollectArgs):
-    env = get_environment(args.environment)
+    env = get_environment(args.environment, args.seed)
     init_lib_seed(args.seed)
+    
     collect_config = get_collect_config(args.environment, args.split)
     agent = get_agent(env, args.environment, collect_config, args.device)
-    blacklist = construct_blacklist(collect_config.blacklist_paths)
+    
+    shapes_env = args.environment in [Environments.CUBES_3D, Environments.SHAPES_2D]
+    atari_env = args.environment != Environments.CRAFTER and not shapes_env
+    
+    blacklist = construct_blacklist(collect_config.blacklist_paths, atari_env)
 
     ep_idx = 0
-    atari_env = args.environment != Environments.CRAFTER
+    shapes_env = args.environment in [Environments.CUBES_3D, Environments.SHAPES_2D]
+    atari_env = args.environment != Environments.CRAFTER and not shapes_env
     with tqdm(total=args.episodes) as pbar:
+        
         while ep_idx < args.episodes:
-            burnin_steps = np.random.randint(collect_config.min_burnin,
-                                             collect_config.max_burnin)
+            burnin_steps = 0
+            if collect_config.max_burnin and collect_config.min_burnin < 0:
+                
+                burnin_steps = np.random.randint(collect_config.min_burnin,
+                                                 collect_config.max_burnin)
+                
             episode_states = []
             episode_actions = []
             agent.reset()
@@ -67,24 +78,29 @@ def collect(args: CollectArgs):
 
                 step_state = env.step(action)
                 if len(step_state) == 5:
-                    obs, _, truncated, terminated, _ = step_state
+                    obs, _, truncated, terminated, info = step_state
                     done = terminated
                 else:
-                    obs, _, done, _ = step_state
+                    obs, _, done, info = step_state
+
+
 
                 state = None
 
                 if atari_env:
                     state = copy.deepcopy(
                         np.array(env.ale.getRAM(), dtype=np.int32))
+                    
+                if shapes_env:
+                    state = info['state']
 
                 if after_warmup:
                     after_warmup = False
-                    if atari_env and check_duplication(blacklist, state):
+                    if (atari_env or shapes_env) and check_duplication(blacklist, state):
                         break
 
-                if collect_config.crop:
-                    obs = crop_normalize(obs, collect_config.crop)
+                # if collect_config.crop:
+                #     obs = crop_normalize(obs, collect_config.crop)
                 episode_actions.append(action)
                 step_idx += 1
                 save_obs(
@@ -92,9 +108,9 @@ def collect(args: CollectArgs):
                     step_idx,
                     obs,
                     collect_config.save_path,
-                    atari_env,
+                    atari_env or shapes_env,
                 )
-                if state:
+                if state is not None:
                     episode_states.append(state)
 
                 if step_idx >= args.steps:

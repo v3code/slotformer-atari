@@ -14,13 +14,13 @@ class SlotFormerParams(BaseParams):
     # optimizer settings
     # Adam optimizer, Cosine decay with Warmup
     optimizer = 'Lion'
-    lr = 1e-4
+    lr = 1e-3
     warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
     # no weight decay, no gradient clipping
 
     # data settings
-    dataset = 'pong'
-    data_root = './data/pong'
+    dataset = 'crafter'
+    data_root = './data/crafter'
     tasks = ['all']  # train on all 8 scenarios
     n_sample_frames = 1  # train on single frames
     frame_offset = 1  # no offset

@@ -5,11 +5,12 @@ import torch.nn.functional as F
 from nerv.training import BaseModel
 
 from slotformer.base_slots.models import StoSAVi
+from slotformer.video_prediction.models.perceiver import TransformerActionEncoderSC
 
 
 def get_sin_pos_enc(seq_len, d_model):
     """Sinusoid absolute positional encoding."""
-    inv_freq = 1. / (10000**(torch.arange(0.0, d_model, 2.0) / d_model))
+    inv_freq = 1. / (10000 ** (torch.arange(0.0, d_model, 2.0) / d_model))
     pos_seq = torch.arange(seq_len - 1, -1, -1).type_as(inv_freq)
     sinusoid_inp = torch.outer(pos_seq, inv_freq)
     pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)
@@ -49,25 +50,34 @@ class SlotRollouter(Rollouter):
     """Transformer encoder only."""
 
     def __init__(
-        self,
-        num_slots,
-        slot_size,
-        history_len,  # burn-in steps
-        t_pe='sin',  # temporal P.E.
-        slots_pe='',  # slots P.E., None in SlotFormer
-        # Transformer-related configs
-        d_model=128,
-        num_layers=4,
-        num_heads=8,
-        ffn_dim=512,
-        norm_first=True,
+            self,
+            num_slots,
+            slot_size,
+            history_len,  # burn-in steps
+            t_pe='sin',  # temporal P.E.
+            slots_pe='',  # slots P.E., None in SlotFormer
+            # Transformer-related configs
+            d_model=128,
+            num_layers=4,
+            num_heads=8,
+            ffn_dim=512,
+            norm_first=True,
+            action_conditioning=False,
+            discrete_actions=True,
+            actions_dim=4,
+            max_discrete_actions=12,
     ):
         super().__init__()
 
         self.num_slots = num_slots
         self.history_len = history_len
 
+        if action_conditioning and discrete_actions:
+            self.action_embedding = nn.Embedding(max_discrete_actions, actions_dim)
+
         self.in_proj = nn.Linear(slot_size, d_model)
+        self.action_conditioning = action_conditioning
+        self.discrete_actions = discrete_actions
 
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -76,13 +86,45 @@ class SlotRollouter(Rollouter):
             norm_first=norm_first,
             batch_first=True,
         )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer=enc_layer, num_layers=num_layers)
+
+        self.transformer_encoder = self._build_transformer(d_model,
+                                                           num_layers,
+                                                           num_heads,
+                                                           ffn_dim,
+                                                           norm_first,
+                                                           action_conditioning,
+                                                           actions_dim)
         self.enc_t_pe = build_pos_enc(t_pe, history_len, d_model)
         self.enc_slots_pe = build_pos_enc(slots_pe, num_slots, d_model)
         self.out_proj = nn.Linear(d_model, slot_size)
 
-    def forward(self, x, pred_len):
+    def _build_transformer(self,
+                           d_model=128,
+                           num_layers=4,
+                           num_heads=8,
+                           ffn_dim=512,
+                           norm_first=True,
+                           action_conditioning=False,
+                           actions_dim=4):
+        if action_conditioning:
+            return TransformerActionEncoderSC(d_model=d_model,
+                                              num_layers=num_layers,
+                                              num_heads=num_heads,
+                                              ffn_dim=ffn_dim,
+                                              actions_dim=actions_dim)
+        else:
+            enc_layer = nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=num_heads,
+                dim_feedforward=ffn_dim,
+                norm_first=norm_first,
+                batch_first=True,
+            )
+
+            return nn.TransformerEncoder(
+                encoder_layer=enc_layer, num_layers=num_layers)
+
+    def forward(self, x, pred_len, actions=None):
         """Forward function.
 
         Args:
@@ -100,11 +142,11 @@ class SlotRollouter(Rollouter):
 
         # temporal_pe repeat for each slot, shouldn't be None
         # [1, T, D] --> [B, T, N, D] --> [B, T * N, D]
-        enc_pe = self.enc_t_pe.unsqueeze(2).\
+        enc_pe = self.enc_t_pe.unsqueeze(2). \
             repeat(B, 1, self.num_slots, 1).flatten(1, 2)
         # slots_pe repeat for each timestep
         if self.enc_slots_pe is not None:
-            slots_pe = self.enc_slots_pe.unsqueeze(1).\
+            slots_pe = self.enc_slots_pe.unsqueeze(1). \
                 repeat(B, self.history_len, 1, 1).flatten(1, 2)
             enc_pe = slots_pe + enc_pe
 
@@ -116,7 +158,12 @@ class SlotRollouter(Rollouter):
             # encoder positional encoding
             x = x + enc_pe
             # spatio-temporal interaction via transformer
-            x = self.transformer_encoder(x)
+            if self.action_conditioning:
+                if self.discrete_actions:
+                    actions = self.action_embedding(actions)
+                x = self.transformer_encoder(x, actions)
+            else:
+                x = self.transformer_encoder(x)
             # take the last N output tokens to predict slots
             pred_slots = self.out_proj(x[:, -self.num_slots:])
             pred_out.append(pred_slots)
@@ -163,6 +210,10 @@ class SlotFormer(BaseModel):
                 num_heads=8,
                 ffn_dim=512,
                 norm_first=True,
+                action_conditioning=False,
+                discrete_actions=True,
+                actions_dim=4,
+                max_discrete_actions=12
             ),
             loss_dict=dict(
                 rollout_len=6,
@@ -291,13 +342,13 @@ class SlotFormer(BaseModel):
         # compute per-step slot loss in eval time
         if not self.training:
             for step in range(min(6, gt_slots.shape[1])):
-                loss_dict[f'slot_recon_loss_{step+1}'] = \
+                loss_dict[f'slot_recon_loss_{step + 1}'] = \
                     slots_loss[:, step].mean()
 
         # apply temporal loss weighting as done in RPIN
         # penalize more for early steps, less for later steps
         if self.loss_decay_factor < 1.:
-            w = self.loss_decay_factor**torch.arange(gt_slots.shape[1])
+            w = self.loss_decay_factor ** torch.arange(gt_slots.shape[1])
             w = w.type_as(slots_loss)
             # w should sum up to rollout_T
             w = w / w.sum() * gt_slots.shape[1]

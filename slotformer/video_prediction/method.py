@@ -9,6 +9,8 @@ from nerv.training import BaseMethod
 
 from slotformer.base_slots.method import SAViMethod, STEVEMethod, \
     to_rgb_from_tensor
+    
+from nerv.lion import Lion
 
 
 def build_method(**kwargs):
@@ -195,7 +197,7 @@ class STEVESlotFormerMethod(SlotFormerMethod):
         # video, which is super slow
         # therefore, we don't perform visualization in eval
         # change this if you want to see reconstruction anyways
-        recon_video = False
+        recon_video = True
         super().validation_epoch(
             model, san_check_step=san_check_step, sample_video=recon_video)
 
@@ -239,7 +241,7 @@ class STEVESlotFormerMethod(SlotFormerMethod):
             slots = torch.cat([slots[:past_steps], pred_slots], dim=0)
             soft_recon, hard_recon = self._slots2video(model, slots)
             save_video = self._make_video(
-                video, soft_recon, hard_recon, history_len=past_steps)
+                video, soft_recon, hard_recon)
             rollout_results.append(save_video)
             del soft_recon, hard_recon
             torch.cuda.empty_cache()

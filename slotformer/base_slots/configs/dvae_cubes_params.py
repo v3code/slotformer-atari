@@ -9,18 +9,18 @@ class SlotFormerParams(BaseParams):
     max_epochs = 20  # ~700k steps
     save_interval = 0.25  # save every 0.25 epoch
     save_epoch_end = True  # save ckp at the end of every epoch
-    n_samples =  4  # Physion has 8 scenarios
+    n_samples = 4  # Physion has 8 scenarios
 
     # optimizer settings
     # Adam optimizer, Cosine decay with Warmup
     optimizer = 'Lion'
-    lr = 1e-4
+    lr = 1e-3
     warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
     # no weight decay, no gradient clipping
 
     # data settings
-    dataset = 'pong'
-    data_root = './data/pong'
+    dataset = 'cubes'
+    data_root = './data/cubes'
     tasks = ['all']  # train on all 8 scenarios
     n_sample_frames = 1  # train on single frames
     frame_offset = 1  # no offset

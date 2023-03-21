@@ -22,10 +22,13 @@ class SlotAttention(nn.Module):
         num_iterations,
         num_slots,
         slot_size,
+        truncate,
         mlp_hidden_size,
         eps=1e-6,
     ):
+        assert truncate in ['bi-level', 'fixed-point', 'none']
         super().__init__()
+        self.truncate = truncate
         self.in_features = in_features
         self.num_iterations = num_iterations
         self.num_slots = num_slots
@@ -52,8 +55,10 @@ class SlotAttention(nn.Module):
             nn.ReLU(),
             nn.Linear(self.mlp_hidden_size, self.slot_size),
         )
+        
+        
 
-    def forward(self, inputs, slots):
+    def forward(self, inputs, slots, slots_init):
         """Forward function.
 
         Args:
@@ -73,7 +78,13 @@ class SlotAttention(nn.Module):
         assert len(slots.shape) == 3
 
         # Multiple rounds of attention.
-        for _ in range(self.num_iterations):
+        for i in range(self.num_iterations):
+            if i == self.num_iterations - 1:
+                if self.truncate == 'bi-level':
+                    slots = slots.detach() + slots_init - slots_init.detach()
+                elif self.truncate == 'fixed-point':
+                    slots = slots.detach()
+                
             slots_prev = slots
 
             # Attention. Shape: [B, num_slots, slot_size].
