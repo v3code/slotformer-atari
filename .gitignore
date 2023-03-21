@@ -5,6 +5,8 @@ data/pong
 data/spinv
 data/OBJ3D
 data/CLEVRER
+data/shapes
+data/cubes
 data/Physion
 data/PHYRE
 data/*.pkl
