@@ -22,10 +22,12 @@ class CollectArgs(Tap):
     environment: Environments
     steps: int = 50
     seed: int = 42
-    episodes: int = 1000
+    episodes: int = 10000
     split: Literal['train', 'test', 'val'] = 'train'
     black_list: Optional[List[Path]] = None
     device: Optional[str] = None
+    use_random: bool = True
+    ignore_blacklist = True
 
     def configure(self) -> None:
         self.add_argument('environment',
@@ -38,21 +40,19 @@ def collect(args: CollectArgs):
     init_lib_seed(args.seed)
     
     collect_config = get_collect_config(args.environment, args.split)
-    agent = get_agent(env, args.environment, collect_config, args.device)
+    agent = get_agent(env, args.environment, collect_config, args.device, args.use_random)
     
     shapes_env = args.environment in [Environments.CUBES_3D, Environments.SHAPES_2D]
-    atari_env = args.environment != Environments.CRAFTER and not shapes_env
+    atari_env = args.environment in [Environments.PONG, Environments.SPACE_INVADERS]
     
-    blacklist = construct_blacklist(collect_config.blacklist_paths, atari_env)
+    blacklist = construct_blacklist(collect_config.blacklist_paths, atari_env, args.ignore_blacklist)
 
     ep_idx = 0
-    shapes_env = args.environment in [Environments.CUBES_3D, Environments.SHAPES_2D]
-    atari_env = args.environment != Environments.CRAFTER and not shapes_env
     with tqdm(total=args.episodes) as pbar:
         
         while ep_idx < args.episodes:
             burnin_steps = 0
-            if collect_config.max_burnin and collect_config.min_burnin < 0:
+            if collect_config.max_burnin > 0 and collect_config.min_burnin > 0:
                 
                 burnin_steps = np.random.randint(collect_config.min_burnin,
                                                  collect_config.max_burnin)
@@ -99,8 +99,8 @@ def collect(args: CollectArgs):
                     if (atari_env or shapes_env) and check_duplication(blacklist, state):
                         break
 
-                # if collect_config.crop:
-                #     obs = crop_normalize(obs, collect_config.crop)
+                if collect_config.crop:
+                    obs = crop_normalize(obs, collect_config.crop)
                 episode_actions.append(action)
                 step_idx += 1
                 save_obs(
@@ -120,6 +120,7 @@ def collect(args: CollectArgs):
                     if step_idx < args.steps:
                         delete_episode_observations(collect_config.save_path, ep_idx)
                         break
+                    assert len(episode_actions) == args.steps
                     save_actions(episode_actions, ep_idx, collect_config.save_path)
                     save_state_ids(episode_states, ep_idx, collect_config.save_path)
                     ep_idx += 1

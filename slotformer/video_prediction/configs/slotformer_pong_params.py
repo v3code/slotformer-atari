@@ -14,35 +14,43 @@ class SlotFormerParams(BaseParams):
 
     # optimizer settings
     # Adam optimizer, Cosine decay with Warmup
-    optimizer = 'Lion'
+    optimizer = 'Adam'
     lr = 2e-4
     warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
     # no weight decay, no gradient clipping
-
+    # sample_video = False
+    
     # data settings
     dataset = 'pong_slots'
     data_root = './data/pong'
     slots_root = './data/pong/slots.pkl'
     tasks = ['all']  # train on all 8 scenarios
-    n_sample_frames = 6 + 10  # train on video clips of 6 frames
+    n_sample_frames = 1 + 8  # train on video clips of 6 frames
     frame_offset = 1  # no offset
     video_len = 50  
     train_batch_size = 64
     val_batch_size = 64
-    num_workers = 1
+    num_workers = 3
     
     
 
     # model configs
     model = 'STEVESlotFormer'
     resolution = (64, 64)
-    input_frames = 6  # burn-in frames
+    input_frames = 1  # burn-in frames
 
     num_slots = 4
-    slot_size = 64
+    slot_size = 16
     slot_dict = dict(
         num_slots=num_slots,
         slot_size=slot_size,
+        slot_mlp_size=slot_size * 4,
+        num_iterations=5,
+        slots_init='shared_gaussian',
+        truncate='fixed-point',
+        sigma=1,
+        
+        use_dvae_encodings = True
     )
 
     # Rollouter
@@ -55,31 +63,35 @@ class SlotFormerParams(BaseParams):
         # Transformer-related configs
         d_model=slot_size,
         num_layers=4,
-        num_heads=8,
+        num_heads=4,
         ffn_dim=slot_size * 4,
         norm_first=True,
+        action_conditioning=True,
+        actions_dim=18,
+        discrete_actions=True,
     )
 
 
     # dVAE tokenizer
     dvae_dict = dict(
         down_factor=4,
-        vocab_size=64,
-        dvae_ckp_path='pretrained/dvae_pong_params/model_20.pth',
+        vocab_size=16,
+        dvae_ckp_path='/code/checkpoint/dvae_pong_params/models/epoch/model_20.pth',
     )
 
     # TransformerDecoder
     dec_dict = dict(
-        dec_num_layers=2,
-        dec_num_heads=1,
+        dec_num_layers=4,
+        dec_num_heads=4,
         dec_d_model=slot_size,
-        dec_ckp_path='pretrained/steve_pong_params/models/epoch/model_20.pth',
+        atten_type='linear',
+        dec_ckp_path='/code/checkpoint/steve_pong_params/models/epoch/model_16.pth',
     )
 
     # loss configs
     loss_dict = dict(
         rollout_len=n_sample_frames - rollout_dict['history_len'],
-        use_img_recon_loss=True,  # STEVE recon img is too memory-intensive
+        use_img_recon_loss=False,  # STEVE recon img is too memory-intensive
     )
 
     slot_recon_loss_w = 1.

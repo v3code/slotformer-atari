@@ -3,7 +3,8 @@ from torch import nn
 from torch.nn import functional as F
 
 from nerv.training import BaseModel
-from .utils import torch_cat
+from slotformer.base_slots.models.mlp import MLPDecoder
+from .utils import SoftPositionEmbed, torch_cat
 from .savi import SlotAttention, StoSAVi
 from .dVAE import dVAE
 from .steve_transformer import STEVETransformerDecoder
@@ -75,6 +76,7 @@ class SlotAttentionWMask(SlotAttention):
             )
             slots = slots.view(bs, self.num_slots, self.slot_size)
             slots = slots + self.mlp(slots)
+            
 
         return slots, seg_mask
 
@@ -93,7 +95,8 @@ class STEVE(StoSAVi):
             num_iterations=2,
             slots_init='shared_gaussian',
             truncate='bi-level',
-            sigma=1
+            use_dvae_encodings = True,
+            sigma=1,
         ),
         dvae_dict=dict(
             down_factor=4,
@@ -133,6 +136,7 @@ class STEVE(StoSAVi):
         self.resolution = resolution
         self.clip_len = clip_len
         self.eps = eps
+        
 
         self.slot_dict = slot_dict
         self.dvae_dict = dvae_dict
@@ -140,10 +144,14 @@ class STEVE(StoSAVi):
         self.dec_dict = dec_dict
         self.pred_dict = pred_dict
         self.loss_dict = loss_dict
-
+        
+        self.vocab_size = self.dvae_dict['vocab_size']
+        self.use_dvae_encodings = self.slot_dict['use_dvae_encodings']
+        
         self._build_slot_attention()
         self._build_dvae()
-        self._build_encoder()
+        if not self.use_dvae_encodings:
+            self._build_encoder()
         self._build_decoder()
         self._build_predictor()
         self._build_loss()
@@ -162,6 +170,11 @@ class STEVE(StoSAVi):
         self.sa_truncate = self.slot_dict['truncate'] 
         self.sa_init = self.slot_dict['slots_init'] 
         self.sa_init_sigma = self.slot_dict['sigma']
+        
+        # in_features = self.enc_out_channels
+        in_features = self.vocab_size
+        # if self.use_dvae_encodings:
+        #     in_features = self.dec_dict['dec_d_model']
         
         assert self.sa_init in ['shared_gaussian', 'embedding', 'param', 'embedding_lr_sigma']
         if self.sa_init == 'shared_gaussian':
@@ -183,7 +196,7 @@ class STEVE(StoSAVi):
             raise NotImplementedError
         
         self.slot_attention = SlotAttentionWMask(
-            in_features=self.enc_out_channels,
+            in_features=in_features,
             num_iterations=self.num_iterations,
             num_slots=self.num_slots,
             slot_size=self.slot_size,
@@ -194,13 +207,17 @@ class STEVE(StoSAVi):
 
     def _build_dvae(self):
         # Build dVAE module
-        self.vocab_size = self.dvae_dict['vocab_size']
         self.down_factor = self.dvae_dict['down_factor']
         self.dvae = dVAE(vocab_size=self.vocab_size, img_channels=3)
+        if self.use_dvae_encodings:
+            h, w = self.resolution
+            self.visual_resolution = h // self.down_factor, w // self.down_factor
         ckp_path = self.dvae_dict['dvae_ckp_path']
         assert ckp_path, 'Please provide pretrained dVAE weight'
         ckp = torch.load(ckp_path, map_location='cpu')
-        self.dvae.load_state_dict(ckp['state_dict'])
+        if 'state_dict' in ckp:
+            ckp = ckp['state_dict']
+        self.dvae.load_state_dict(ckp)
         # fix dVAE
         for p in self.dvae.parameters():
             p.requires_grad = False
@@ -212,31 +229,52 @@ class STEVE(StoSAVi):
         H, W = self.resolution
         self.h, self.w = H // self.down_factor, W // self.down_factor
         self.num_patches = self.h * self.w
-        max_len = self.num_patches - 1
-        self.trans_decoder = STEVETransformerDecoder(
-            vocab_size=self.vocab_size,
-            d_model=self.dec_dict['dec_d_model'],
-            n_head=self.dec_dict['dec_num_heads'],
-            max_len=max_len,
-            num_slots=self.num_slots,
-            num_layers=self.dec_dict['dec_num_layers'],
-        )
+        if self.dec_dict['dec_type'] == 'slate':
+            max_len = self.num_patches - 1
+            self.trans_decoder = STEVETransformerDecoder(
+                vocab_size=self.vocab_size,
+                d_model=self.dec_dict['dec_d_model'],
+                n_head=self.dec_dict['dec_num_heads'],
+                max_len=max_len,
+                num_slots=self.num_slots,
+                num_layers=self.dec_dict['dec_num_layers'],
+            )
+        elif self.dec_dict['dec_type'] == 'mlp':
+            self.trans_decoder = MLPDecoder(
+                **self.dec_dict['model_conf']
+            )
+            self.encoder_pos_embedding = SoftPositionEmbed(self.vocab_size,
+                                                           self.visual_resolution)
+        else:
+            raise NotImplementedError
 
     def _build_loss(self):
         """Loss calculation settings."""
         self.use_img_recon_loss = self.loss_dict['use_img_recon_loss']
         self.use_slots_correlation_loss = self.loss_dict['use_slots_correlation_loss']
         self.use_cossine_similarity_loss = self.loss_dict['use_cossine_similarity_loss']
-        
-    def encode(self, img, prev_slots=None):
+    
+    def forward_decoder(self, in_slots, target_token_id, tokens=None):
+        if self.dec_dict['dec_type'] == 'slate':
+            h, w = self.h, self.w
+            in_token_id = target_token_id[:, :-1]
+            pred_token_id = self.trans_decoder(in_slots, in_token_id, tokens)[:, -(h * w):]
+            return pred_token_id, None
+        elif self.dec_dict['dec_type'] == 'mlp':
+            return self.trans_decoder(in_slots)
+            
+    
+    def encode(self, inp, prev_slots=None):
         """Encode from img to slots."""
-        B, T = img.shape[:2]
-        img = img.flatten(0, 1)
+        B, T = inp.shape[:2]
+        if not self.use_dvae_encodings:
+            img = inp.flatten(0, 1)
 
-        encoder_out = self._get_encoder_out(img)
-        encoder_out = encoder_out.unflatten(0, (B, T))
-        # `encoder_out` has shape: [B, T, H*W, out_features]
-        
+            encoder_out = self._get_encoder_out(img)
+            encoder_out = encoder_out.unflatten(0, (B, T))
+            # `encoder_out` has shape: [B, T, H*W, out_features]
+        else: 
+            encoder_out = inp
         slot_inits = None
 
         # apply SlotAttn on video frames via reusing slots
@@ -256,10 +294,12 @@ class STEVE(StoSAVi):
     
                 latents = slot_inits
             else:
-                latents = self.predictor(prev_slots)  # [B, N, C]
+                # latents = self.predictor(prev_slots)  # [B, N, C]
+                latents = prev_slots
 
             # SA to get `post_slots`
             slots, masks = self.slot_attention(encoder_out[:, idx], latents, slot_inits)
+            # print(masks.shape)
             all_slots.append(slots)
             all_masks.append(masks.unflatten(-1, self.visual_resolution))
 
@@ -329,7 +369,7 @@ class STEVE(StoSAVi):
             torch.cuda.empty_cache()
         cat_dict = {k: torch_cat(v, dim=1) for k, v in cat_dict.items()}
         return cat_dict
-
+    
     def _forward(self, img, img_token_id=None, prev_slots=None):
         """Forward function.
 
@@ -343,34 +383,60 @@ class STEVE(StoSAVi):
         if prev_slots is None:
             self._reset_rnn()
 
-        slots, masks, encoder_out = self.encode(img, prev_slots)
+        B, T = img.shape[:2]
+        
+        img_token_id, logits = self.dvae.tokenize(img, return_logits = True, one_hot=False)
+        img_token_id = img_token_id.flatten(2,3).detach()
+        
+        
+        # # tokenize the images
+        # if img_token_id is None:
+        #     with torch.no_grad():
+        #         img_token_id = self.dvae.tokenize(
+        #             img, one_hot=False).flatten(2, 3).detach()
+        h, w = self.h, self.w
+        target_token_id = img_token_id.flatten(0, 1).long()  # [B*T, h*w]
+        if self.dec_dict['dec_type'] == 'slate': 
+            slots_inp = self.trans_decoder.project_idx(target_token_id[:, :-1]).unflatten(0, (B, T))
+        else:
+            logits = self.encoder_pos_embedding(logits)
+            slots_inp = logits.flatten(2, 3).transpose(1, 2).unflatten(0, (B, T))
+            
+        tokens = None
+        # if self.use_dvae_encodings:
+            # slots_inp = self.trans_decoder.project_idx(target_token_id[:, :-1]).unflatten(0, (B, T))
+        slots, masks, _ = self.encode(slots_inp, prev_slots)
         # `slots` has shape: [B, T, self.num_slots, self.slot_size]
         # `masks` has shape: [B, T, self.num_slots, H, W]
 
         out_dict = {'slots': slots, 'masks': masks}
-        if self.testing:
+        if self.testing and self.dec_dict['dec_type'] == 'slate':
             return out_dict
-
-        # tokenize the images
-        if img_token_id is None:
-            with torch.no_grad():
-                img_token_id = self.dvae.tokenize(
-                    img, one_hot=False).flatten(2, 3).detach()
-        h, w = self.h, self.w
-        target_token_id = img_token_id.flatten(0, 1).long()  # [B*T, h*w]
-
         # TransformerDecoder token prediction loss
         in_slots = slots.flatten(0, 1)  # [B*T, N, C]
-        in_token_id = target_token_id[:, :-1]
-        pred_token_id = self.trans_decoder(in_slots, in_token_id)[:, -(h * w):]
+        pred_token_id, dec_masks = self.forward_decoder(in_slots, target_token_id, tokens)
+        # resize masks to the original resolution
+        if not self.training and self.visual_resolution != self.resolution and dec_masks is not None:
+            with torch.no_grad():
+                dec_masks = dec_masks.reshape(-1, self.num_slots, h, w).flatten(0,1)
+                dec_masks = dec_masks.unsqueeze(1)  # [BTN, 1, H, W]
+                dec_masks = F.interpolate(
+                    dec_masks,
+                    self.resolution,
+                    mode='bilinear',
+                    align_corners=False,
+                ).squeeze(1).unflatten(0, (B, T, self.num_slots))
+        
         # [B*T, h*w, vocab_size]
         out_dict.update({
             'pred_token_id': pred_token_id,
             'target_token_id': target_token_id,
+            'dec_masks': dec_masks
         })
         
         if self.use_slots_correlation_loss or self.use_cossine_similarity_loss:
             out_dict['slots'] = in_slots
+        
 
         # decode image for loss computing
         if self.use_img_recon_loss:
@@ -411,8 +477,7 @@ class STEVE(StoSAVi):
         pred_token_id = out_dict['pred_token_id'].flatten(0, 1)
         slots = out_dict['slots']
         target_token_id = out_dict['target_token_id'].flatten(0, 1)
-        token_recon_loss = F.cross_entropy(pred_token_id, target_token_id)
-        
+        token_recon_loss = F.cross_entropy(pred_token_id, target_token_id) 
         loss_dict = {'token_recon_loss': token_recon_loss}
         if self.use_cossine_similarity_loss:
             slots_similarity = self._get_slots_cos_similarity(slots)

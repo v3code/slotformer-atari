@@ -340,7 +340,7 @@ class STEVETransformerDecoder(nn.Module):
         # final idx prediction
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 
-    def forward(self, slots, idx):
+    def forward(self, slots, idx, tokens=None):
         """Forward pass.
 
         Args:
@@ -356,16 +356,25 @@ class STEVETransformerDecoder(nn.Module):
         slots = self.in_proj(slots)  # [B, t1, C]
 
         # add [BOS] token
-        BOS = torch.ones((B, 1)).type_as(idx) * self.vocab_size
-        idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
-        token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
-        tokens = self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
+        if tokens is None:
+            tokens = self.project_idx(idx)
+            # BOS = torch.ones((B, 1)).type_as(idx) * self.vocab_size
+            # idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
+            # token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
+            # tokens = self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
 
         x = self.tf_dec(tokens, slots)  # [B, 1 + t2, C]
 
         logits = self.head(x)  # [B, 1 + t2, vocab_size]
 
         return logits
+    
+    def project_idx(self, idx):
+        B, T = idx.shape
+        BOS = torch.ones((B, 1)).type_as(idx) * self.vocab_size
+        idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
+        token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
+        return self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
 
     def generate(self, slots, steps, sample=False, temperature=1.0):
         """Generate `steps` tokens conditioned on slots."""

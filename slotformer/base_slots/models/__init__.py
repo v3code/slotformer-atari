@@ -1,5 +1,7 @@
+from slotformer.base_slots.models.stevenson import STEVENSON
 from .savi import StoSAVi
 from .dVAE import dVAE
+from .vq_vae.vqvae import VQVAE
 from .steve import STEVE
 from .utils import get_lr, to_rgb_from_tensor, assert_shape, SoftPositionEmbed
 from .steve_utils import cosine_anneal, gumbel_softmax, make_one_hot
@@ -18,7 +20,12 @@ def build_model(params):
             loss_dict=params.loss_dict,
         )
     elif params.model == 'dVAE':
-        return dVAE(vocab_size=params.vocab_size, img_channels=3)
+        return dVAE(vocab_size=params.vocab_size, use_percept_loss=params.use_percept_loss, img_channels=3)
+    elif params.model == 'vqVAE':
+        return VQVAE(
+            enc_dec_dict=params.enc_dec_dict,
+            vq_dict=params.vq_dict,
+        )
     elif params.model == 'STEVE':
         return STEVE(
             resolution=params.resolution,
@@ -26,6 +33,17 @@ def build_model(params):
             slot_dict=params.slot_dict,
             dvae_dict=params.dvae_dict,
             enc_dict=params.enc_dict,
+            dec_dict=params.dec_dict,
+            pred_dict=params.pred_dict,
+            loss_dict=params.loss_dict,
+        )
+    elif params.model == 'STEVENSON':
+        return STEVENSON(
+            resolution=params.resolution,
+            clip_len=params.input_frames,
+            slot_dict=params.slot_dict,
+            vae_dict=params.vae_dict,
+            # enc_dict=params.enc_dict,
             dec_dict=params.dec_dict,
             pred_dict=params.pred_dict,
             loss_dict=params.loss_dict,

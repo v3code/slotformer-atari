@@ -1,0 +1,44 @@
+git root error: Cmd('git') failed due to: exit code(128)
+  cmdline: git rev-parse --show-toplevel
+  stderr: 'fatal: detected dubious ownership in repository at '/code'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /code'
+git root error: Cmd('git') failed due to: exit code(128)
+  cmdline: git rev-parse --show-toplevel
+  stderr: 'fatal: detected dubious ownership in repository at '/code'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /code'
+INFO: training model in base_slots task!
+INFO: using FP16 training!
+Traceback (most recent call last):
+  File "scripts/train.py", line 113, in <module>
+    main(params)
+  File "scripts/train.py", line 58, in main
+    wandb.init(
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_init.py", line 1199, in init
+    raise e
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_init.py", line 1172, in init
+    wi.setup(kwargs)
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_init.py", line 306, in setup
+    wandb_login._login(
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_login.py", line 307, in _login
+    logged_in = wlogin.login()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_login.py", line 159, in login
+    self.login_display()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_login.py", line 164, in login_display
+    username = self._wl._get_username()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_setup.py", line 194, in _get_username
+    self._load_viewer()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/wandb_setup.py", line 216, in _load_viewer
+    s.query_with_timeout()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/sdk/lib/server.py", line 35, in query_with_timeout
+    viewer_tuple, viewer_thread = async_viewer()
+  File "/opt/conda/envs/slotformer/lib/python3.8/site-packages/wandb/util.py", line 1188, in wrapper
+    result = q.get(True, timeout)
+  File "/opt/conda/envs/slotformer/lib/python3.8/queue.py", line 179, in get
+    self.not_empty.wait(remaining)
+  File "/opt/conda/envs/slotformer/lib/python3.8/threading.py", line 306, in wait
+    gotit = waiter.acquire(True, timeout)
+KeyboardInterrupt

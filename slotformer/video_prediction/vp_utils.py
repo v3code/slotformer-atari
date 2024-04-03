@@ -254,6 +254,80 @@ def miou_metric(gt_mask, pred_mask):
     ]
     return np.mean(ious)
 
+def hungarian_l2_loss(x, y):
+    n_objs = x.shape[1]
+    pairwise_cost = torch.pow(torch.unsqueeze(y, -2).expand(-1, -1, n_objs, -1) - torch.unsqueeze(x, -3).expand(-1, n_objs, -1, -1), 2).mean(dim=-1)
+    indices = np.array(list(map(linear_sum_assignment, pairwise_cost.detach().cpu().numpy())))
+    transposed_indices = np.transpose(indices, axes=(0, 2, 1))
+    final_costs = torch.gather(pairwise_cost, dim=-1, index=torch.LongTensor(transposed_indices).to(pairwise_cost.device))[:, :, 1]
+    return final_costs.sum(dim=1)
+
+def hungarian_huber_loss(x, y):
+    n_objs = x.shape[1]
+    pairwise_cost = F.smooth_l1_loss(torch.unsqueeze(y, -2).expand(-1, -1, n_objs, -1), torch.unsqueeze(x, -3).expand(-1, n_objs, -1, -1), reduction='none').mean(dim=-1)
+    indices = np.array(list(map(linear_sum_assignment, pairwise_cost.detach().cpu().numpy())))
+    transposed_indices = np.transpose(indices, axes=(0, 2, 1))
+    final_costs = torch.gather(pairwise_cost, dim=-1, index=torch.LongTensor(transposed_indices).to(pairwise_cost.device))[:, :, 1]
+    return final_costs.sum(dim=1)
+
+def slots_distance_matrix(x, y):
+    num_samples, num_objects, dim = x.shape
+    
+
+    x = x.unsqueeze(1).expand(num_samples, num_samples, num_objects, dim)
+    y = y.unsqueeze(0).expand(num_samples, num_samples, num_objects, dim)
+    
+    loss_matrix = hungarian_l2_loss(x.reshape(-1, num_objects, dim), y.reshape(-1, num_objects, dim))
+    return loss_matrix.reshape(num_samples, num_samples)
+    
+    
+
+def pairwise_distance_matrix(x, y):
+
+    num_samples = x.size(0)
+    dim = x.size(1)
+
+    x = x.unsqueeze(1).expand(num_samples, num_samples, dim)
+    y = y.unsqueeze(0).expand(num_samples, num_samples, dim)
+
+    return torch.pow(x - y, 2).sum(2)
+
+
+def hit_at_k(predictions: torch.Tensor, ground_truth_idx: torch.Tensor, device: torch.device, k: int = 10) -> int:
+    """Calculates number of hits@k.
+
+    :param predictions: BxN tensor of prediction values where B is batch size and N number of classes. Predictions
+    must be sorted in class ids order
+    :param ground_truth_idx: Bx1 tensor with index of ground truth class
+    :param device: device on which calculations are taking place
+    :param k: number of top K results to be considered as hits
+    :return: Hits@K score
+    """
+    assert predictions.size(0) == ground_truth_idx.size(0)
+
+    zero_tensor = torch.tensor([0], device=device)
+    one_tensor = torch.tensor([1], device=device)
+    _, indices = predictions.topk(k=k, largest=False)
+    print(indices)
+    return torch.where(indices == ground_truth_idx, one_tensor, zero_tensor).sum().item()
+
+
+
+def mrr(predictions: torch.Tensor, ground_truth_idx: torch.Tensor) -> float:
+    """Calculates mean reciprocal rank (MRR) for given predictions and ground truth values.
+
+    :param predictions: BxN tensor of prediction values where B is batch size and N number of classes. Predictions
+    must be sorted in class ids order
+    :param ground_truth_idx: Bx1 tensor with index of ground truth class
+    :return: Mean reciprocal rank score
+    """
+    assert predictions.size(0) == ground_truth_idx.size(0)
+
+    indices = predictions.argsort()
+    return (1.0 / (indices == ground_truth_idx).nonzero()[:, 1].float().add(1.0)).sum().item()
+
+        
+    
 
 @torch.no_grad()
 def pred_eval_step(
@@ -261,6 +335,8 @@ def pred_eval_step(
     pred,
     lpips_fn,
     gt_mask=None,
+    gt_slots=None,
+    pred_slots=None,
     pred_mask=None,
     gt_pres_mask=None,
     gt_bbox=None,
@@ -331,6 +407,11 @@ def pred_eval_step(
         all_mse.append(mse)
         all_ssim.append(ssim)
         all_psnr.append(psnr)
+    
+    
+    # compute prediction metrics
+    
+    
     return {
         'mse': all_mse,
         'ssim': all_ssim,

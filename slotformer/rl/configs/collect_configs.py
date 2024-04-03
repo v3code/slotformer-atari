@@ -17,6 +17,11 @@ class BaseCollectConfig:
     size: Optional[Tuple[int, int]] = None
     crop: Optional[Tuple[int, int]] = None
     eps: Optional[float] = None
+    
+    
+@dataclass
+class NavAgentCollectConfig(BaseCollectConfig):
+    random_action_proba: float = 0.5
 
 
 def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']) -> BaseCollectConfig:
@@ -37,6 +42,23 @@ def get_collect_config(env: Environments, split: Literal['train', 'test', 'val']
             size=(64, 64),
             eps=0.5
         )
+    elif env == Environments.NAVIGATION_5x5:
+        return NavAgentCollectConfig(
+            min_burnin=0,
+            max_burnin=0,
+            save_path=Path(f'data/nav5x5/{split}'),
+            blacklist_paths=[],
+            random_action_proba=0.5
+        )
+        
+    elif env == Environments.PUSHING_5x5:
+        return BaseCollectConfig(
+            min_burnin=0,
+            max_burnin=0,
+            save_path=Path(f'data/push5x5/{split}'),
+            blacklist_paths=[],
+        )
+         
     elif env == Environments.SPACE_INVADERS:
         return BaseCollectConfig(
             min_burnin=50,

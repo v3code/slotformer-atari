@@ -1,15 +1,39 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .steve_utils import Conv2dBlock, conv2d, gumbel_softmax, make_one_hot
 
 from nerv.training import BaseModel
+from lpips import LPIPS
 
+class dVAEPerceptLoss(nn.Module):
+    def __init__(self, add_abs_loss=True) -> None:
+        super().__init__()
+        self.loss = LPIPS(net='alex')
+        self.add_abs_loss = add_abs_loss
+        self.freeze()
+    
+    def forward(self, x, recon):
+        if len(x.shape) == 5:
+            x = x.flatten(0, 1)
+            recon = recon.flatten(0, 1)
+        percept_loss = self.loss(x, recon).mean()
+        out = dict(percept_loss=percept_loss)
+        if self.add_abs_loss:
+            out['recon_loss'] = torch.abs(x - recon).mean()
+        else:
+            out['recon_loss'] = F.mse_loss(x, recon)
+        return out
+        
+    def freeze(self):
+        self.eval()
+        self.requires_grad_(False) 
 
 class dVAE(BaseModel):
     """dVAE that tokenizes the input image."""
 
-    def __init__(self, vocab_size, img_channels=3):
+    def __init__(self, vocab_size, img_channels=3, use_percept_loss=False):
         super().__init__()
 
         self.vocab_size = vocab_size
@@ -18,6 +42,9 @@ class dVAE(BaseModel):
 
         self._build_encoder()
         self._build_decoder()
+        self.use_percept_loss = use_percept_loss
+        if use_percept_loss:
+            self.loss = dVAEPerceptLoss()
 
         # a hack for only extracting tokens
         self.testing = False
@@ -50,7 +77,7 @@ class dVAE(BaseModel):
             conv2d(64, self.img_channels, 1),
         )
 
-    def tokenize(self, imgs, one_hot=True):
+    def tokenize(self, imgs, one_hot=True, return_logits=False):
         """Tokenize images."""
         B = imgs.shape[0]
         # [B, T, C, H, W]
@@ -73,7 +100,9 @@ class dVAE(BaseModel):
 
         if unflatten:
             z_hard = z_hard.unflatten(0, (B, -1))
-
+            
+        if return_logits:
+            return z_hard, logits
         return z_hard
 
     def detokenize(self, z):
@@ -125,7 +154,7 @@ class dVAE(BaseModel):
         # encode, [B, vocab_size, h, w]
         logits = self.encoder(x)
         z_logits = F.log_softmax(logits, dim=1)
-
+        
         # sample z, [B, vocab_size, h, w]
         z = gumbel_softmax(z_logits, tau, hard=hard, dim=1)
 
@@ -143,9 +172,20 @@ class dVAE(BaseModel):
         """Compute training loss."""
         img = data_dict['img']
         recon = out_dict['recon']
+        if self.use_percept_loss: 
+            return self.loss(img, recon)
         recon_loss = F.mse_loss(recon, img)
         return {'recon_loss': recon_loss}
-
+    
+    @torch.no_grad()
+    def calc_eval_loss(self, data_dict, out_dict):
+        """Loss computation in eval."""
+        loss_dict = self.calc_train_loss(data_dict, out_dict)
+        # if self.use_percept_loss:
+        #     img = data_dict['img']
+        #     recon = out_dict['recon']
+        #     loss_dict['recon_mse'] = F.mse_loss(recon, img)
+        return loss_dict
     @property
     def dtype(self):
         return self.encoder[-1].weight.dtype

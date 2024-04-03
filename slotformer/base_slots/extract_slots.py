@@ -92,7 +92,6 @@ def process_video(model):
             os.path.dirname(args.weight), 'slots.pkl')
     os.system(r'ln -s {} {}'.format(args.save_path, ln_path))
 
-
 def process_test_video(model):
     """Extract slot_embs using video SlotAttn model"""
     test_set = build_dataset(params)
@@ -122,8 +121,10 @@ def process_test_video(model):
 
 def main():
     model = build_model(params)
-    model.load_state_dict(
-        torch.load(args.weight, map_location='cpu')['state_dict'])
+    state = torch.load(args.weight, map_location='cpu')
+    if 'state_dict' in state:
+        state = state['state_dict']
+    model.load_state_dict(state)
     model.testing = True  # we just want slots
     model = torch.nn.DataParallel(model).cuda().eval()
     if 'test' in params.dataset:

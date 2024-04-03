@@ -1,0 +1,47 @@
+from nerv.training import BaseParams
+
+
+class SlotFormerParams(BaseParams):
+    project = 'SlotFormer'
+
+    # training settings
+    gpus = 1  # 1 GPU should also be good
+    max_epochs = 20  # ~700k steps
+    save_interval = 0.25  # save every 0.25 epoch
+    save_epoch_end = True  # save ckp at the end of every epoch
+    n_samples =  4  # Physion has 8 scenarios
+
+    # optimizer settings
+    # Adam optimizer, Cosine decay with Warmup
+    optimizer = 'Adam'
+    lr = 1e-4
+    warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
+    # no weight decay, no gradient clipping
+
+    # data settings
+    dataset = 'pong'
+    data_root = './data/pong'
+    tasks = ['all']  # train on all 8 scenarios
+    n_sample_frames = 1  # train on single frames
+    frame_offset = 1  # no offset
+    video_len = 50  # take the first 150 frames of each video
+    train_batch_size = 128
+    val_batch_size = 128
+    num_workers = 2
+    
+    use_percept_loss=False
+
+    # model configs
+    model = 'dVAE'
+    resolution = (64, 64)
+    vocab_size = 64  # codebook size
+
+    # temperature for gumbel softmax
+    # decay from 1.0 to 0.1 in the first 15% of total steps
+    init_tau = 1.
+    final_tau = 0.1
+    tau_decay_pct = 0.15
+
+    # loss settings
+    recon_loss_w = 1.
+    percept_loss_w = 1.

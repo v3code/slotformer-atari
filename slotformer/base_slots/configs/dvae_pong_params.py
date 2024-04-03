@@ -13,7 +13,7 @@ class SlotFormerParams(BaseParams):
 
     # optimizer settings
     # Adam optimizer, Cosine decay with Warmup
-    optimizer = 'Lion'
+    optimizer = 'Adam'
     lr = 1e-4
     warmup_steps_pct = 0.05  # warmup in the first 5% of total steps
     # no weight decay, no gradient clipping
@@ -32,7 +32,7 @@ class SlotFormerParams(BaseParams):
     # model configs
     model = 'dVAE'
     resolution = (64, 64)
-    vocab_size = 4096  # codebook size
+    vocab_size = 16  # codebook size
 
     # temperature for gumbel softmax
     # decay from 1.0 to 0.1 in the first 15% of total steps

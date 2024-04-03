@@ -92,6 +92,7 @@ def get_output(params, out_dict):
     rollout_len = params.n_sample_frames - history_len
 
     if params.model == 'SlotFormer':
+        slots = out_dict['slots']
         pred = out_dict['recon_combined']
         pred_mask = postproc_mask(out_dict['masks'])
         pred_bbox = masks_to_boxes(pred_mask, params.slot_dict['num_slots'])
@@ -104,7 +105,7 @@ def get_output(params, out_dict):
     if pred_bbox is not None:
         assert pred_bbox.shape[1] == rollout_len
 
-    return pred, pred_mask, pred_bbox
+    return pred, pred_mask, pred_bbox, slots
 
 
 @torch.no_grad()
@@ -138,12 +139,12 @@ def main(params):
 
     for data_dict in tqdm(val_loader):
         data_dict = {k: v.cuda() for k, v in data_dict.items()}
-        gt, gt_mask, gt_bbox, gt_pres_mask = get_input(params, data_dict)
+        gt, gt_mask, gt_bbox, gt_pres_mask, gt_slots = get_input(params, data_dict)
         B = gt.shape[0]
 
         # take model output
         out_dict = model(data_dict)
-        pred, pred_mask, pred_bbox = get_output(params, out_dict)
+        pred, pred_mask, pred_bbox, slots = get_output(params, out_dict)
 
         # compute metrics
         metric_dict = pred_eval_step(

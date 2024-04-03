@@ -7,6 +7,16 @@ from .slotformer import SlotFormer
 from slotformer.base_slots.models import gumbel_softmax, make_one_hot, STEVE
 
 
+def rmsle_loss(pred, actual):
+    return torch.sqrt(F.mse_loss(torch.log(pred + 1), torch.log(actual + 1)))
+
+def calc_cosine_similarity_loss(pred, actual):
+     
+    return torch.sum(F.cosine_similarity(pred.flatten(end_dim=-2), actual.flatten(end_dim=-2))**2)
+
+def calc_dirrectional_loss(pred, actual):
+    return torch.mean((pred[:, :-1] - pred[:, 1:])/((actual[:, :-1] - actual[:, 1:]) + 1e-16))
+
 class STEVESlotFormer(SlotFormer):
     """Transformer-based rollouter on slot embeddings."""
 
@@ -17,6 +27,7 @@ class STEVESlotFormer(SlotFormer):
             slot_dict=dict(
                 num_slots=6,
                 slot_size=192,
+                use_dvae_encodings=False
             ),
             dvae_dict=dict(
                 down_factor=4,
@@ -43,16 +54,21 @@ class STEVESlotFormer(SlotFormer):
                 action_conditioning=False,
                 discrete_actions=True,
                 actions_dim=4,
-                max_discrete_actions=12
+                max_discrete_actions=12,
+                use_teacher_forcing=False,
+                mamba_state=64,
+                use_mamba=False,
             ),
             loss_dict=dict(
                 rollout_len=6,
                 use_img_recon_loss=False,
+                use_cosine_similarity=False,
+                use_directional_loss=False,
             ),
             eps=1e-6,
     ):
         self.dvae_dict = dvae_dict
-
+        self.use_dvae_encodings = slot_dict['use_dvae_encodings']
         super().__init__(
             resolution=resolution,
             clip_len=clip_len,
@@ -62,6 +78,7 @@ class STEVESlotFormer(SlotFormer):
             loss_dict=loss_dict,
             eps=eps,
         )
+        
 
     def _build_dvae(self):
         # Build the same dVAE model as in STEVE
@@ -79,7 +96,9 @@ class STEVESlotFormer(SlotFormer):
         # load pretrained weight
         ckp_path = self.dec_dict['dec_ckp_path']
         assert ckp_path, 'Please provide pretrained Transformer decoder weight'
-        w = torch.load(ckp_path, map_location='cpu')['state_dict']
+        w = torch.load(ckp_path, map_location='cpu')
+        if 'state_dict' in w:
+            w = w['state_dict']
         w = {k[14:]: v for k, v in w.items() if k.startswith('trans_decoder.')}
         self.decoder.load_state_dict(w)
         # freeze decoder
@@ -108,18 +127,22 @@ class STEVESlotFormer(SlotFormer):
 
     def rollout(self, past_slots, pred_len, decode=False, with_gt=True, actions=None):
         """Perform future rollout to `target_len` video."""
-        pred_slots = self.rollouter(past_slots[:, -self.history_len:],
-                                    pred_len, actions)
+        if not self.teacher_forcing:
+            past_slots = past_slots[:, :self.history_len]
+        pred_slots = self.rollouter(past_slots,
+                                    pred_len, actions, self.teacher_forcing)
         return pred_slots
 
     def forward(self, data_dict):
         """Forward pass."""
         slots = data_dict['slots']  # [B, T', N, C]
-        actions = data_dict['actions']
+        actions = data_dict.get('actions')
 
         assert self.rollout_len + self.history_len == slots.shape[1], \
             f'wrong SlotFormer training length {slots.shape[1]}'
-        past_slots = slots[:, :self.history_len]
+        past_slots = slots
+        if not self.teacher_forcing:
+            past_slots = slots[:, :self.history_len]
         gt_slots = slots[:, self.history_len:]
         pred_slots = self.rollout(past_slots, self.rollout_len, actions=actions)
         out_dict = {
@@ -159,16 +182,29 @@ class STEVESlotFormer(SlotFormer):
         pred_slots = out_dict['pred_slots']
         slot_recon_loss = F.mse_loss(pred_slots, gt_slots)
         loss_dict = {'slot_recon_loss': slot_recon_loss}
+        if self.use_cosine_similarity_loss:
+            cosine_similarity_loss = calc_cosine_similarity_loss(pred_slots, gt_slots)
+            loss_dict['cosine_similarity_loss'] = cosine_similarity_loss
+        if self.use_directional_loss:
+            dirrectional_loss = calc_dirrectional_loss(pred_slots, gt_slots)
+            loss_dict['dirrectional_loss'] = dirrectional_loss
         if self.use_img_recon_loss:
             pred_token_id = out_dict['pred_token_id'].flatten(0, 1)
             target_token_id = out_dict['target_token_id'].flatten(0, 1)
             token_recon_loss = F.cross_entropy(pred_token_id, target_token_id)
             loss_dict['img_recon_loss'] = token_recon_loss
         return loss_dict
+    
+    def eval(self):
+        super().eval()
+        self.teacher_forcing = False
+        return self
 
     def train(self, mode=True):
         BaseModel.train(self, mode)
         # keep dVAE and Transformer decoder in eval mode
+        if self.use_teacher_forcing:
+            self.teacher_forcing = True
         self.dvae.eval()
         self.decoder.eval()
         return self

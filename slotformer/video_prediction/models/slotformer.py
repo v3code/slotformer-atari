@@ -1,3 +1,4 @@
+from slotformer.video_prediction.models.mamba import Mamba, MambaArgs
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,7 +6,7 @@ import torch.nn.functional as F
 from nerv.training import BaseModel
 
 from slotformer.base_slots.models import StoSAVi
-from slotformer.video_prediction.models.perceiver import TransformerActionEncoderSC
+# from slotformer.video_prediction.models.perceiver import TransformerActionEncoderSC
 
 
 def get_sin_pos_enc(seq_len, d_model):
@@ -64,54 +65,95 @@ class SlotRollouter(Rollouter):
             norm_first=True,
             action_conditioning=False,
             discrete_actions=True,
-            actions_dim=4,
-            max_discrete_actions=12,
+            actions_dim=12,
+            use_teacher_forcing=False,
+            mamba_state=64,
+            use_mamba=False,
     ):
         super().__init__()
 
         self.num_slots = num_slots
+        self.action_conditioning = action_conditioning
+        self.discrete_actions = discrete_actions
+        self.pred_slots = num_slots
+        if self.action_conditioning:
+            self.num_slots = num_slots
         self.history_len = history_len
+        
+        self.use_mamba = use_mamba
+        
 
         if action_conditioning and discrete_actions:
-            self.action_embedding = nn.Embedding(max_discrete_actions, actions_dim)
+            self.action_embedding = nn.Embedding(actions_dim, d_model)
 
         self.in_proj = nn.Linear(slot_size, d_model)
         self.action_conditioning = action_conditioning
         self.discrete_actions = discrete_actions
 
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=num_heads,
-            dim_feedforward=ffn_dim,
-            norm_first=norm_first,
-            batch_first=True,
-        )
+        # enc_layer = nn.TransformerEncoderLayer(
+        #     d_model=d_model,
+        #     nhead=num_heads,
+        #     dim_feedforward=ffn_dim,
+        #     norm_first=norm_first,
+        #     batch_first=True,
+        # )
 
-        self.transformer_encoder = self._build_transformer(d_model,
+        self.rollouter = self._build_rollouter(use_mamba, d_model,
                                                            num_layers,
                                                            num_heads,
                                                            ffn_dim,
-                                                           norm_first,
-                                                           action_conditioning,
-                                                           actions_dim)
+                                                           mamba_state,
+                                                           norm_first)
         self.enc_t_pe = build_pos_enc(t_pe, history_len, d_model)
         self.enc_slots_pe = build_pos_enc(slots_pe, num_slots, d_model)
-        self.out_proj = nn.Linear(d_model, slot_size)
-
-    def _build_transformer(self,
+        # self.enc_t_act_pe = build_pos_enc('param', history_len, d_model)
+        # self.out_proj = nn.Linear(d_model, slot_size)
+        self.head = self._build_head(d_model, slot_size)
+        
+    def _build_head(self, d_model, slot_size):
+        input_size = d_model*self.num_slots*self.history_len
+        out_size = self.num_slots*slot_size
+        
+        return nn.Sequential(
+            nn.LayerNorm(input_size),
+            nn.Linear(input_size, out_size*4),
+            nn.GELU(),
+            nn.Linear(out_size*4, out_size)
+        )
+        
+        
+        
+    def _build_rollouter(self, use_mamba = False,
                            d_model=128,
                            num_layers=4,
                            num_heads=8,
                            ffn_dim=512,
-                           norm_first=True,
-                           action_conditioning=False,
-                           actions_dim=4):
-        if action_conditioning:
-            return TransformerActionEncoderSC(d_model=d_model,
-                                              num_layers=num_layers,
-                                              num_heads=num_heads,
-                                              ffn_dim=ffn_dim,
-                                              actions_dim=actions_dim)
+                           mamba_state=64,
+                           norm_first=True):
+        if use_mamba:
+            mamba_args = MambaArgs(
+                d_model=d_model,
+                n_layer=num_layers,
+                use_head=False,
+                d_state=mamba_state,
+                expand=4
+            )
+            return Mamba(
+                args=mamba_args
+            )
+        elif self.action_conditioning:
+            dec_layer = nn.TransformerDecoderLayer(
+                d_model=d_model,
+                nhead=num_heads,
+                dim_feedforward=ffn_dim,
+                norm_first=norm_first,
+                batch_first=True,
+            )
+            return nn.TransformerDecoder(
+                decoder_layer=dec_layer,
+                num_layers=num_layers
+            )
+             
         else:
             enc_layer = nn.TransformerEncoderLayer(
                 d_model=d_model,
@@ -123,8 +165,14 @@ class SlotRollouter(Rollouter):
 
             return nn.TransformerEncoder(
                 encoder_layer=enc_layer, num_layers=num_layers)
+    
+    def _project_emb(self, emb):
+        B = emb.shape[0]
+        emb = emb.flatten(start_dim=1)
+        out = self.head(emb)
+        return out.reshape(B, self.num_slots, -1)
 
-    def forward(self, x, pred_len, actions=None):
+    def forward(self, x, pred_len, actions=None, teacher_forcing=False):
         """Forward function.
 
         Args:
@@ -134,16 +182,31 @@ class SlotRollouter(Rollouter):
         Returns:
             [B, pred_len, num_slots, slot_size]
         """
-        assert x.shape[1] == self.history_len, 'wrong burn-in steps'
+        max_in_steps = self.history_len
+        if teacher_forcing:
+            max_in_steps += pred_len
+        
+        # print(x.shape)
+        
+        assert x.shape[1] == max_in_steps, 'wrong burn-in steps'
 
         B = x.shape[0]
-        x = x.flatten(1, 2)  # [B, T * N, slot_size]
-        in_x = x
+        inp = x
+        if teacher_forcing:
+            x = x[:, :self.history_len]
+ 
+        if actions is not None:
+            actions = actions.long()
+            actions = self.action_embedding(actions)
+            # in_actions = actions[:, :self.history_len].unsqueeze(2)
+            # x = torch.cat([x, in_actions], dim=2)
+        in_x = x.flatten(1, 2)
 
         # temporal_pe repeat for each slot, shouldn't be None
         # [1, T, D] --> [B, T, N, D] --> [B, T * N, D]
         enc_pe = self.enc_t_pe.unsqueeze(2). \
             repeat(B, 1, self.num_slots, 1).flatten(1, 2)
+        
         # slots_pe repeat for each timestep
         if self.enc_slots_pe is not None:
             slots_pe = self.enc_slots_pe.unsqueeze(1). \
@@ -152,23 +215,37 @@ class SlotRollouter(Rollouter):
 
         # generate future slots autoregressively
         pred_out = []
-        for _ in range(pred_len):
+        for i in range(pred_len):
             # project to latent space
             x = self.in_proj(in_x)
+            # if actions is not None:
+             # [B, T * N, slot_size]
             # encoder positional encoding
             x = x + enc_pe
-            # spatio-temporal interaction via transformer
+            
             if self.action_conditioning:
-                if self.discrete_actions:
-                    actions = self.action_embedding(actions)
-                x = self.transformer_encoder(x, actions)
+                actions_in = actions[:, i:self.history_len+i].unsqueeze(2).repeat(1, 1, self.num_slots, 1).flatten(1, 2)
+                if not self.use_mamba:
+                    actions_in = actions_in + enc_pe
+                    x = self.rollouter(x, actions_in)
+                else:
+                    x = self.rollouter(x + actions_in)
             else:
-                x = self.transformer_encoder(x)
+                # spatio-temporal interaction via transformer
+                x = self.rollouter(x)
             # take the last N output tokens to predict slots
-            pred_slots = self.out_proj(x[:, -self.num_slots:])
+            pred_slots = self._project_emb(x)
             pred_out.append(pred_slots)
             # feed the predicted slots autoregressively
-            in_x = torch.cat([in_x[:, self.num_slots:], pred_out[-1]], dim=1)
+            if teacher_forcing:
+                next_x = inp[:, self.history_len+i]
+                in_x = torch.cat([in_x[:, self.num_slots:], next_x], dim=1)
+            else:
+                in_x = torch.cat([in_x[:, self.num_slots:], pred_out[-1]], dim=1)
+            # if actions is not None: 
+            #     next_idx = self.history_len + i
+            #     next_action = self.action_embedding(actions[:, next_idx]).unsqueeze(1)
+            #     in_x = torch.cat([in_x, next_action], dim=1)
 
         return torch.stack(pred_out, dim=1)
 
@@ -213,11 +290,16 @@ class SlotFormer(BaseModel):
                 action_conditioning=False,
                 discrete_actions=True,
                 actions_dim=4,
-                max_discrete_actions=12
+                use_teacher_forcing=False,
+                use_mamba=False,
+                mamba_state=64,
             ),
             loss_dict=dict(
                 rollout_len=6,
                 use_img_recon_loss=False,
+                use_cosine_similarity_loss=False,
+                use_directional_loss=False,
+                
             ),
             eps=1e-6,
     ):
@@ -226,6 +308,8 @@ class SlotFormer(BaseModel):
         self.resolution = resolution
         self.clip_len = clip_len
         self.eps = eps
+        self.use_teacher_forcing = rollout_dict.get('use_teacher_forcing', False)
+        self.teacher_forcing = False
 
         self.slot_dict = slot_dict
         self.dec_dict = dec_dict
@@ -278,17 +362,21 @@ class SlotFormer(BaseModel):
         """Loss calculation settings."""
         self.rollout_len = self.loss_dict['rollout_len']  # rollout steps
         self.use_img_recon_loss = self.loss_dict['use_img_recon_loss']
-
+        self.use_cosine_similarity_loss = self.loss_dict['use_cosine_similarity_loss']
+        self.use_directional_loss = self.loss_dict['use_directional_loss']
+        
     def decode(self, slots):
         """Decode from slots to reconstructed images and masks."""
         # same as SAVi
         return StoSAVi.decode(self, slots)
 
-    def rollout(self, past_slots, pred_len, decode=False, with_gt=True, actions=None):
+    def rollout(self, past_slots, pred_len, decode=False, with_gt=True, actions=None,):
         """Unroll slots for `pred_len` steps, potentially decode images."""
         B = past_slots.shape[0]  # [B, T, N, C]
-        pred_slots = self.rollouter(past_slots[:, -self.history_len:],
-                                    pred_len, actions)
+        if not self.teacher_forcing:
+            past_slots = past_slots[:, -self.history_len:]
+        pred_slots = self.rollouter(past_slots,
+                                    pred_len, actions, teacher_forcing=self.teacher_forcing)
         # `decode` is usually called from outside
         # used to visualize an entire video (burn-in + rollout)
         # i.e. `with_gt` is True
@@ -314,10 +402,13 @@ class SlotFormer(BaseModel):
     def forward(self, data_dict):
         """Forward pass."""
         slots = data_dict['slots']  # [B, T, N, C]
-        actions = data_dict['actions']
+        actions = data_dict.get('actions')
         assert self.rollout_len + self.history_len == slots.shape[1], \
             f'wrong SlotFormer training length {slots.shape[1]}'
-        past_slots = slots[:, :self.history_len]
+        if self.teacher_forcing:
+            past_slots = slots[:, :self.history_len]
+        else:
+            past_slots = slots
         gt_slots = slots[:, self.history_len:]
         if self.use_img_recon_loss:
             out_dict = self.rollout(
@@ -386,10 +477,16 @@ class SlotFormer(BaseModel):
     @property
     def device(self):
         return self.rollouter.device
+    
+    def eval(self):
+        self.teacher_forcing = False
+        return super().eval()
 
     def train(self, mode=True):
         super().train(mode)
         # keep decoder part in eval mode
+        if self.use_teacher_forcing:
+            self.teacher_forcing = mode
         self.decoder.eval()
         self.decoder_pos_embedding.eval()
         return self

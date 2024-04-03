@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import pickle
 import numpy as np
 from PIL import Image, ImageFile
 
@@ -36,7 +37,6 @@ class PongDataset(Dataset):
 
         # Get all numbers
         self.valid_idx = self._get_sample_idx()
-
         # by default, we load small video clips
         self.load_video = False
 
@@ -96,6 +96,18 @@ class PongDataset(Dataset):
             data_dict['bbox'] = torch.from_numpy(bboxes).float()
             data_dict['pres_mask'] = torch.from_numpy(pres_mask).bool()
         return data_dict
+    
+    def read_full_actions(self, idx):
+        folder, start_idx = self._get_video_start_idx(idx)
+        filename = osp.join(folder, 'actions.npy') # TODO make better
+        actions = np.load(filename)
+        return actions
+    
+    def _read_actions(self, idx):
+        folder, start_idx = self._get_video_start_idx(idx)
+        filename = osp.join(folder, 'actions.npy') # TODO make better
+        actions = np.load(filename) 
+        return actions[start_idx:start_idx+self.n_sample_frames]
 
     def _get_sample_idx(self):
         valid_idx = []  # (video_folder, start_idx)
@@ -142,6 +154,8 @@ class PongSlotsDataset(PongDataset):
 
         # pre-computed slots
         self.video_slots = video_slots
+    
+    
 
     def _read_slots(self, idx):
         """Read video frames slots."""
@@ -163,16 +177,17 @@ class PongSlotsDataset(PongDataset):
         """
         slots = self._read_slots(idx)
         frames = self._read_frames(idx)
-        data_path = os.path.join(self.data_root, self.split)
-        # actions = load_actions(data_path, idx)
+        actions = self._read_actions(idx)
+
         # state_ids = load_state_ids(data_path, idx)
         data_dict = {
             'data_idx': idx,
             'slots': slots,
             'img': frames,
-            # 'actions': actions,
+            'actions': actions,
             # 'state_ids': state_ids,
         }
+        
         if self.split != 'train':
             bboxes, pres_mask = self._read_bboxes(idx)
             data_dict['bbox'] = torch.from_numpy(bboxes).float()

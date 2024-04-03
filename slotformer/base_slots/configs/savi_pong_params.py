@@ -33,6 +33,8 @@ class SlotFormerParams(BaseParams):
     model = 'StoSAVi'  # we actually use the deterministic version here
     resolution = (64, 64)
     input_frames = n_sample_frames
+    
+    use_dvae_encodings = False
 
     # Slot Attention
     slot_dict = dict(

@@ -80,7 +80,7 @@ class SingleStepSlotRollouter(SlotRollouter):
             # encoder positional encoding
             x = x + enc_pe[:, -x.shape[1]:]
             # spatio-temporal interaction via Transformer
-            x = self.transformer_encoder(x)
+            x = self.rollouter(x)
             # take the last N output tokens to predict slots
             pred_slots = self.out_proj(x[:, -self.num_slots:])
             pred_out.append(pred_slots)

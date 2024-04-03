@@ -10,7 +10,7 @@ from nerv.training import BaseMethod
 from slotformer.base_slots.method import SAViMethod, STEVEMethod, \
     to_rgb_from_tensor
     
-from nerv.lion import Lion
+# from nerv.lion import Lion
 
 
 def build_method(**kwargs):
@@ -94,8 +94,10 @@ class SlotFormerMethod(SAViMethod):
         ])  # [T, 3, H, 3*W]
         return save_video
 
-    def _read_video_and_slots(self, dst, idx):
+    def _read_video_actions_and_slots(self, dst, idx):
         """Read the video and slots from the dataset."""
+        
+        actions = None
         # PHYRE
         if 'phyre' in self.params.dataset.lower():
             # read video
@@ -117,9 +119,14 @@ class SlotFormerMethod(SAViMethod):
             if self.params.frame_offset > 1:
                 slots = np.ascontiguousarray(slots[::self.params.frame_offset])
             slots = torch.from_numpy(slots).float().to(self.device)
+            if 'pong' in self.params.dataset.lower():
+                actions = dst.read_full_actions(idx)
+                actions = torch.from_numpy(actions).long().to(self.device)
         T = min(video.shape[0], slots.shape[0])
         # video: [T, 3, H, W], slots: [T, N, C]
-        return video[:T], slots[:T]
+        if actions is not None:
+            actions = actions[:T].unsqueeze(0)
+        return video[:T], slots[:T], actions
 
     @torch.no_grad()
     def validation_epoch(self, model, san_check_step=-1, sample_video=True):
@@ -149,7 +156,7 @@ class SlotFormerMethod(SAViMethod):
         sampled_idx = self._get_sample_idx(self.params.n_samples, dst)
         results, rollout_results, compare_results = [], [], []
         for i in sampled_idx:
-            video, slots = self._read_video_and_slots(dst, i.item())
+            video, slots, actions = self._read_video_actions_and_slots(dst, i.item())
             T = video.shape[0]
             # reconstruct gt_slots as sanity-check
             # i.e. if the pre-trained weights are loaded correctly
@@ -162,7 +169,7 @@ class SlotFormerMethod(SAViMethod):
             past_steps = self.params.input_frames
             past_slots = slots[:past_steps][None]  # [1, t, N, C]
             out_dict = model.rollout(
-                past_slots, T - past_steps, decode=True, with_gt=True)
+                past_slots, T - past_steps, decode=True, with_gt=True, actions=actions)
             out_dict = {k: v[0] for k, v in out_dict.items()}
             rollout_combined, recons, masks = out_dict['recon_combined'], \
                 out_dict['recons'], out_dict['masks']
@@ -228,16 +235,16 @@ class STEVESlotFormerMethod(SlotFormerMethod):
         sampled_idx = self._get_sample_idx(self.params.n_samples, dst)
         results, rollout_results = [], []
         for i in sampled_idx:
-            video, slots = self._read_video_and_slots(dst, i.item())
+            video, slots, actions = self._read_video_actions_and_slots(dst, i.item())
             T = video.shape[0]
             # recon as sanity-check
             soft_recon, hard_recon = self._slots2video(model, slots)
             save_video = self._make_video(video, soft_recon, hard_recon)
             results.append(save_video)
             # rollout
-            past_steps = T // 4  # self.params.roll_history_len
+            past_steps = self.model.module.history_len  # self.params.roll_history_len
             past_slots = slots[:past_steps][None]  # [1, t, N, C]
-            pred_slots = model.rollout(past_slots, T - past_steps)[0]
+            pred_slots = model.rollout(past_slots, T - past_steps, actions=actions)[0]
             slots = torch.cat([slots[:past_steps], pred_slots], dim=0)
             soft_recon, hard_recon = self._slots2video(model, slots)
             save_video = self._make_video(

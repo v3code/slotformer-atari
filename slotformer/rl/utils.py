@@ -28,11 +28,15 @@ def get_torch_device(device_option: Optional[str]) -> torch.device:
 
 def get_environment(env_str: Environments, seed=None) -> gym.Env:
     if env_str == Environments.PONG:
-        return gym.make("PongDeterministic-v4", seed=seed)
+        return gym.make("PongDeterministic-v4")
     elif env_str == Environments.SPACE_INVADERS:
         return gym.make("SpaceInvadersDeterministic-v4", seed=seed)
     elif env_str == Environments.CRAFTER:
         return gym.make("CrafterReward-v1", apply_api_compatibility=True, seed=seed)
+    elif env_str == Environments.NAVIGATION_5x5:
+        return gym.make("Navigation5x5-v0", seed=seed)
+    elif env_str == Environments.PUSHING_5x5:
+        return gym.make("Pushing5x5-v0", seed=seed)
     elif env_str == Environments.CUBES_3D:
         return gym.make("Cubes-v0", seed=seed)
     elif env_str == Environments.SHAPES_2D:
@@ -63,11 +67,12 @@ def crop_normalize(img: np.ndarray,
 
 def construct_blacklist(
         black_list_folders: Optional[List[Path]] = None,
-        is_numpy = False
+        is_numpy = False,
+        ignore_blacklist = True
 ) -> Optional[Set[bytes]]:
     blacklist = set()
 
-    if not black_list_folders:
+    if not black_list_folders or ignore_blacklist:
         return blacklist
 
     for path in black_list_folders:
@@ -121,6 +126,7 @@ def save_obs(ep: int, step: int, obs: np.ndarray, save_path: Path, normalized=Tr
     maybe_create_dirs(get_dir_name(save_path))
     if normalized:
         obs = np.round(obs * 225).astype('uint8')
+    # print(obs)
     image = Image.fromarray(obs)
     image.save(save_path)
 
@@ -130,15 +136,13 @@ def save_actions(actions: List[Union[np.ndarray, int]],
                  save_path: Path):
     save_path = os.path.join(save_path, ACTIONS_FOLDER_TEMPLATE.format(ep_index))
     maybe_create_dirs(get_dir_name(save_path))
-    with open(save_path, "wb") as f:
-        pickle.dump(actions, f)
+    np.save(save_path, actions)
 
 
 def load_action_from_path(load_path: Union[Path, str]) -> np.ndarray:
     if not os.path.isfile(load_path):
         raise ValueError("Actions not found.")
-    with open(load_path, "rb") as f:
-        actions = pickle.load(f)
+    actions = np.load(load_path)
     return actions
 
 
@@ -150,8 +154,7 @@ def load_actions(path: Union[Path, str, bytes], episode: int):
 def save_state_ids(state_ids: List[np.ndarray], ep_idx: int, save_path: Union[Path, str, bytes]):
     save_path = os.path.join(save_path, STATE_IDS_FOLDER_TEMPLATE.format(ep_idx))
     maybe_create_dirs(get_dir_name(save_path))
-    with open(save_path, "wb") as f:
-        pickle.dump(state_ids, f)
+    np.save(save_path, state_ids)
 
 
 def get_dir_name(path: Union[bytes, str, os.PathLike]) -> AnyStr:
