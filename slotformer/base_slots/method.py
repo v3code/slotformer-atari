@@ -886,6 +886,7 @@ class STEVENSONMethod(SlotBaseMethod):
             slots = out_dict['slots'][0]  # [T, num_slots, slot_size]
             all_recon_video, bs = [], 16  # to avoid OOM
             for batch_idx in range(0, slots.shape[0], bs):
+                
                 _, logits = model.trans_decoder.generate(
                     slots[batch_idx:batch_idx + bs],
                     steps=num_patches,

@@ -126,7 +126,7 @@ def main():
         state = state['state_dict']
     model.load_state_dict(state)
     model.testing = True  # we just want slots
-    model = torch.nn.DataParallel(model).cuda().eval()
+    model = model.cuda().eval()
     if 'test' in params.dataset:
         process_test_video(model)
     else:
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     params = params.SlotFormerParams()
     if 'physion' in args.params:
         params.dataset = f'physion_{args.subset}'
-    assert params.dataset in args.save_path
+    # assert params.dataset in args.save_path
 
     torch.backends.cudnn.benchmark = True
     main()

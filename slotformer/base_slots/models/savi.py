@@ -2,11 +2,12 @@ import copy
 import math
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 
 from nerv.training import BaseModel
 from nerv.models import deconv_out_shape, conv_norm_act, deconv_norm_act
+from slotformer.base_slots.models.steve_utils import OCRConv2dBlock, conv2d
 
 from .utils import assert_shape, SoftPositionEmbed, torch_cat
 from .predictor import ResidualMLPPredictor, TransformerPredictor, \
@@ -120,6 +121,45 @@ class SlotAttention(nn.Module):
     def device(self):
         return self.project_k.weight.device
 
+    
+class PositionalEmbedding(nn.Module):
+    def __init__(self, obs_size: int, obs_channels: int):
+        super().__init__()
+        width = height = obs_size
+        east = torch.linspace(0, 1, width).repeat(height)
+        west = torch.linspace(1, 0, width).repeat(height)
+        south = torch.linspace(0, 1, height).repeat(width)
+        north = torch.linspace(1, 0, height).repeat(width)
+        east = east.reshape(height, width)
+        west = west.reshape(height, width)
+        south = south.reshape(width, height).T
+        north = north.reshape(width, height).T
+        # (4, h, w)
+        linear_pos_embedding = torch.stack([north, south, west, east], dim=0)
+        linear_pos_embedding.unsqueeze_(0)  # for batch size
+        self.channels_map = nn.Conv2d(4, obs_channels, kernel_size=1)
+        self.register_buffer("linear_position_embedding", linear_pos_embedding)
+
+    def forward(self, x: Tensor) -> Tensor:
+        bs_linear_position_embedding = self.linear_position_embedding.expand(
+            x.size(0), 4, x.size(2), x.size(3)
+        )
+        x = x + self.channels_map(bs_linear_position_embedding)
+        return x
+
+
+class SlotAttnCNNEncoder(nn.Module):
+    def __init__(self, obs_channels, hidden_size):
+        super().__init__()
+        self._encoder = nn.Sequential(
+            OCRConv2dBlock(obs_channels, hidden_size, 5, 1, 2),
+            OCRConv2dBlock(hidden_size, hidden_size, 5, 1, 2),
+            OCRConv2dBlock(hidden_size, hidden_size, 5, 1, 2),
+            conv2d(hidden_size, hidden_size, 5, 1, 2),
+        )
+
+    def forward(self, obs):
+        return self._encoder(obs)
 
 class StoSAVi(BaseModel):
     """SA model with stochastic kernel and additional prior_slots head.
@@ -227,16 +267,27 @@ class StoSAVi(BaseModel):
             mlp_hidden_size=self.slot_mlp_size,
             eps=self.eps,
         )
+        
+    def build_ocr_encoder(self): 
+        self._enc = SlotAttnCNNEncoder(3, self.enc_out_channels)
+        self._enc_pos = PositionalEmbedding(self.resolution[0], self.enc_out_channels)
 
     def _build_encoder(self):
         # Build Encoder
         # Conv CNN --> PosEnc --> MLP
+        
+        self.use_ocr_enc = self.enc_dict["use_ocr_encoder"]
+        
         self.enc_channels = list(self.enc_dict['enc_channels'])  # CNN channels
         self.enc_ks = self.enc_dict['enc_ks']  # kernel size in CNN
         self.enc_norm = self.enc_dict['enc_norm']  # norm in CNN
         self.visual_resolution = (64, 64)  # CNN out visual resolution
-        self.visual_channels = self.enc_channels[-1]  # CNN out visual channels
-
+        self.visual_channels = self.enc_out_channels  # CNN out visual channels
+        
+        
+        if self.use_ocr_enc:
+            return self.build_ocr_encoder()
+        
         enc_layers = len(self.enc_channels) - 1
         self.encoder = nn.Sequential(*[
             conv_norm_act(
@@ -377,6 +428,11 @@ class StoSAVi(BaseModel):
 
     def _get_encoder_out(self, img):
         """Encode image, potentially add pos enc, apply MLP."""
+        if self.use_ocr_enc:
+            emb = self._enc(img)
+            emb = self._enc_pos(emb)
+            emb = emb.permute(0, 2, 3, 1).flatten(start_dim=1, end_dim=2) 
+            return emb
         encoder_out = self.encoder(img).type(self.dtype)
         encoder_out = self.encoder_pos_embedding(encoder_out)
         # `encoder_out` has shape: [B, C, H, W]
@@ -427,7 +483,8 @@ class StoSAVi(BaseModel):
         return kernel_dist, post_slots, encoder_out
 
     def _reset_rnn(self):
-        self.predictor.reset()
+        pass
+        # self.predictor.reset()
 
     def forward(self, data_dict):
         """A wrapper for model forward.

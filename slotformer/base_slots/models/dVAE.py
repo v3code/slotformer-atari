@@ -1,8 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .steve_utils import Conv2dBlock, conv2d, gumbel_softmax, make_one_hot
+from .steve_utils import Conv2dBlock, OCRConv2dBlock, conv2d, gumbel_softmax, make_one_hot
 
 from nerv.training import BaseModel
 from lpips import LPIPS
@@ -29,50 +30,58 @@ class dVAEPerceptLoss(nn.Module):
     def freeze(self):
         self.eval()
         self.requires_grad_(False) 
+        
+        
+
+
 
 class dVAE(BaseModel):
     """dVAE that tokenizes the input image."""
 
-    def __init__(self, vocab_size, img_channels=3, use_percept_loss=False):
+    def __init__(self, vocab_size, img_channels=3, use_ocr_version=False, use_percept_loss=False):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.img_channels = img_channels
         self.tau = 1.
 
+        self.use_ocr_version = use_ocr_version
+        self.convblock = OCRConv2dBlock if self.use_ocr_version else Conv2dBlock
+        
         self._build_encoder()
         self._build_decoder()
         self.use_percept_loss = use_percept_loss
         if use_percept_loss:
             self.loss = dVAEPerceptLoss()
+        
 
         # a hack for only extracting tokens
         self.testing = False
 
     def _build_encoder(self):
         self.encoder = nn.Sequential(
-            Conv2dBlock(self.img_channels, 64, 4, 4),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
+            self.convblock(self.img_channels, 64, 4, 4),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
             conv2d(64, self.vocab_size, 1),
         )
 
     def _build_decoder(self):
         self.decoder = nn.Sequential(
-            Conv2dBlock(self.vocab_size, 64, 1),
-            Conv2dBlock(64, 64, 3, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 256, 1),
+            self.convblock(self.vocab_size, 64, 1),
+            self.convblock(64, 64, 3, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 256, 1),
             nn.PixelShuffle(2),
-            Conv2dBlock(64, 64, 3, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 64, 1, 1),
-            Conv2dBlock(64, 256, 1),
+            self.convblock(64, 64, 3, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 64, 1, 1),
+            self.convblock(64, 256, 1),
             nn.PixelShuffle(2),
             conv2d(64, self.img_channels, 1),
         )

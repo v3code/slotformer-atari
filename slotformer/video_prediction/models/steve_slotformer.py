@@ -58,6 +58,7 @@ class STEVESlotFormer(SlotFormer):
                 use_teacher_forcing=False,
                 mamba_state=64,
                 use_mamba=False,
+                cat_actions=False,
             ),
             loss_dict=dict(
                 rollout_len=6,
@@ -188,11 +189,11 @@ class STEVESlotFormer(SlotFormer):
         if self.use_directional_loss:
             dirrectional_loss = calc_dirrectional_loss(pred_slots, gt_slots)
             loss_dict['dirrectional_loss'] = dirrectional_loss
-        if self.use_img_recon_loss:
-            pred_token_id = out_dict['pred_token_id'].flatten(0, 1)
-            target_token_id = out_dict['target_token_id'].flatten(0, 1)
-            token_recon_loss = F.cross_entropy(pred_token_id, target_token_id)
-            loss_dict['img_recon_loss'] = token_recon_loss
+        # if self.use_img_recon_loss:
+        #     pred_token_id = out_dict['pred_token_id'].flatten(0, 1)
+        #     target_token_id = out_dict['target_token_id'].flatten(0, 1)
+        #     token_recon_loss = F.cross_entropy(pred_token_id, target_token_id)
+        #     loss_dict['img_recon_loss'] = token_recon_loss
         return loss_dict
     
     def eval(self):

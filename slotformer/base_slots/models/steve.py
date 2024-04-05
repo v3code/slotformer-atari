@@ -8,8 +8,160 @@ from .utils import SoftPositionEmbed, torch_cat
 from .savi import SlotAttention, StoSAVi
 from .dVAE import dVAE
 from .steve_transformer import STEVETransformerDecoder
-from .steve_utils import gumbel_softmax
+from .steve_utils import gru_cell, gumbel_softmax, linear
 
+
+class OCRSlotAttention(nn.Module):
+    def __init__(
+        self,
+        num_iterations,
+        num_slots,
+        input_size,
+        slot_size,
+        mlp_hidden_size,
+        heads,
+        epsilon=1e-8,
+    ):
+        super().__init__()
+
+        self.num_iterations = num_iterations
+        self.num_slots = num_slots
+        self.input_size = input_size
+        self.slot_size = slot_size
+        self.mlp_hidden_size = mlp_hidden_size
+        self.epsilon = epsilon
+        self.num_heads = heads
+
+        self.norm_inputs = nn.LayerNorm(input_size)
+        self.norm_slots = nn.LayerNorm(slot_size)
+        self.norm_mlp = nn.LayerNorm(slot_size)
+
+        # Linear maps for the attention module.
+        self.project_q = linear(slot_size, slot_size, bias=False)
+        self.project_k = linear(input_size, slot_size, bias=False)
+        self.project_v = linear(input_size, slot_size, bias=False)
+
+        # Slot update functions.
+        self.gru = gru_cell(slot_size, slot_size)
+        self.mlp = nn.Sequential(
+            linear(slot_size, mlp_hidden_size, weight_init="kaiming"),
+            nn.ReLU(),
+            linear(mlp_hidden_size, slot_size),
+        )
+
+    def forward(self, inputs, slots):
+        # `inputs` has shape [batch_size, num_inputs, input_size].
+        # `slots` has shape [batch_size, num_slots, slot_size].
+
+        B, N_kv, D_inp = inputs.size()
+        B, N_q, D_slot = slots.size()
+
+        inputs = self.norm_inputs(inputs)
+        k = (
+            self.project_k(inputs).view(B, N_kv, self.num_heads, -1).transpose(1, 2)
+        )  # Shape: [batch_size, num_heads, num_inputs, slot_size // num_heads].
+        v = (
+            self.project_v(inputs).view(B, N_kv, self.num_heads, -1).transpose(1, 2)
+        )  # Shape: [batch_size, num_heads, num_inputs, slot_size // num_heads].
+        k = ((self.slot_size // self.num_heads) ** (-0.5)) * k
+
+        # Multiple rounds of attention.
+        for _ in range(self.num_iterations):
+            slots_prev = slots
+            slots = self.norm_slots(slots)
+
+            # Attention.
+            q = (
+                self.project_q(slots).view(B, N_q, self.num_heads, -1).transpose(1, 2)
+            )  # Shape: [batch_size, num_heads, num_slots, slot_size // num_heads].
+            attn_logits = torch.matmul(
+                k, q.transpose(-1, -2)
+            )  # Shape: [batch_size, num_heads, num_inputs, num_slots].
+            attn = (
+                F.softmax(
+                    attn_logits.transpose(1, 2).reshape(B, N_kv, self.num_heads * N_q),
+                    dim=-1,
+                )
+                .view(B, N_kv, self.num_heads, N_q)
+                .transpose(1, 2)
+            )  # Shape: [batch_size, num_heads, num_inputs, num_slots].
+            attn_vis = attn.sum(1).transpose(1, 2)  # Shape: [batch_size, num_inputs, num_slots].
+
+            # Weighted mean.
+            attn = attn + self.epsilon
+            attn = attn / torch.sum(attn, dim=-2, keepdim=True)
+            updates = torch.matmul(
+                attn.transpose(-1, -2), v
+            )  # Shape: [batch_size, num_heads, num_slots, slot_size // num_heads].
+            updates = updates.transpose(1, 2).reshape(
+                B, N_q, -1
+            )  # Shape: [batch_size, num_slots, slot_size].
+
+            # Slot update.
+            slots = self.gru(
+                updates.view(-1, self.slot_size), slots_prev.view(-1, self.slot_size)
+            )
+            slots = slots.view(-1, self.num_slots, self.slot_size)
+            slots = slots + self.mlp(self.norm_mlp(slots))
+
+        return slots, attn_vis.detach()
+
+
+class OCRSlotAttentionEncoder(nn.Module):
+    def __init__(
+        self,
+        num_iterations,
+        num_slots,
+        input_channels,
+        slot_size,
+        mlp_hidden_size,
+    ):
+        super().__init__()
+
+        self.num_iterations = num_iterations
+        self.num_slots = num_slots
+        self.input_channels = input_channels
+        self.slot_size = slot_size
+        self.mlp_hidden_size = mlp_hidden_size
+
+        self.layer_norm = nn.LayerNorm(input_channels)
+        self.mlp = nn.Sequential(
+            linear(input_channels, input_channels, weight_init="kaiming"),
+            nn.ReLU(),
+            linear(input_channels, input_channels),
+        )
+
+        # # Parameters for Gaussian init (shared by all slots).
+        # self.slot_mu = nn.Parameter(torch.zeros(1, 1, slot_size))
+        # self.slot_log_sigma = nn.Parameter(torch.zeros(1, 1, slot_size))
+        # nn.init.xavier_uniform_(self.slot_mu)
+        # nn.init.xavier_uniform_(self.slot_log_sigma)
+
+        self.slot_attention = OCRSlotAttention(
+            num_iterations,
+            num_slots,
+            input_channels,
+            slot_size,
+            mlp_hidden_size,
+            heads=1,
+        )
+
+    def forward(self, x, slots, slots_init=None):
+        # `image` has shape: [batch_size, img_channels, img_height, img_width].
+        # `encoder_grid` has shape: [batch_size, pos_channels, enc_height, enc_width].
+        B, *_ = x.size()
+        x = self.mlp(self.layer_norm(x))
+        # `x` has shape: [batch_size, enc_height * enc_width, cnn_hidden_size].
+
+        # Slot Attention module.
+        # slots = x.new_empty(B, self.num_slots, self.slot_size).normal_()
+        # slots = self.slot_mu + torch.exp(self.slot_log_sigma) * slots
+        slots, attn = self.slot_attention(x, slots)
+        
+        # `slots` has shape: [batch_size, num_slots, slot_size].
+        # `attn` has shape: [batch_size, enc_height * enc_width, num_slots].
+
+        return slots, attn
 
 class SlotAttentionWMask(SlotAttention):
     """Slot attention module that iteratively performs cross-attention.
@@ -89,6 +241,7 @@ class STEVE(StoSAVi):
         resolution,
         clip_len,
         slot_dict=dict(
+            use_ocr_sa=False,
             num_slots=7,
             slot_size=128,
             slot_mlp_size=256,
@@ -153,13 +306,17 @@ class STEVE(StoSAVi):
         if not self.use_dvae_encodings:
             self._build_encoder()
         self._build_decoder()
-        self._build_predictor()
+        # self._build_predictor()
         self._build_loss()
 
         # a hack for only extracting slots
         self.testing = False
-
+        
     def _build_slot_attention(self):
+        
+        self.use_ocr_sa = self.slot_dict['use_ocr_sa']
+        
+        
         # Build SlotAttention module
         # kernels x img_feats --> posterior_slots
         self.enc_out_channels = self.enc_dict['enc_out_channels']
@@ -171,10 +328,10 @@ class STEVE(StoSAVi):
         self.sa_init = self.slot_dict['slots_init'] 
         self.sa_init_sigma = self.slot_dict['sigma']
         
-        # in_features = self.enc_out_channels
-        in_features = self.vocab_size
-        # if self.use_dvae_encodings:
-        #     in_features = self.dec_dict['dec_d_model']
+        in_features = self.enc_out_channels
+        # in_features = self.vocab_size
+        if self.use_dvae_encodings:
+            in_features = self.dec_dict['dec_d_model']
         
         assert self.sa_init in ['shared_gaussian', 'embedding', 'param', 'embedding_lr_sigma']
         if self.sa_init == 'shared_gaussian':
@@ -195,6 +352,18 @@ class STEVE(StoSAVi):
         else:
             raise NotImplementedError
         
+        
+        
+        if self.use_ocr_sa:
+            self.slot_attention = OCRSlotAttentionEncoder(
+                num_iterations=self.num_iterations,
+                input_channels=in_features,
+                mlp_hidden_size=self.slot_mlp_size,
+                num_slots=self.num_slots,
+                slot_size=self.slot_size, 
+            )
+            return
+         
         self.slot_attention = SlotAttentionWMask(
             in_features=in_features,
             num_iterations=self.num_iterations,
@@ -208,7 +377,12 @@ class STEVE(StoSAVi):
     def _build_dvae(self):
         # Build dVAE module
         self.down_factor = self.dvae_dict['down_factor']
-        self.dvae = dVAE(vocab_size=self.vocab_size, img_channels=3)
+
+        
+        self.vocab_size = self.dvae_dict['vocab_size']
+        self.use_dvae_encodings = self.slot_dict['use_dvae_encodings']
+        
+        self.dvae = dVAE(vocab_size=self.vocab_size, img_channels=3, use_ocr_version=self.dvae_dict.get("use_ocr_version", False))
         if self.use_dvae_encodings:
             h, w = self.resolution
             self.visual_resolution = h // self.down_factor, w // self.down_factor
@@ -230,11 +404,18 @@ class STEVE(StoSAVi):
         self.h, self.w = H // self.down_factor, W // self.down_factor
         self.num_patches = self.h * self.w
         if self.dec_dict['dec_type'] == 'slate':
-            max_len = self.num_patches - 1
+
+            self.use_bos_token_in_tf = self.dec_dict["use_bos_token_in_tf"],
+            max_len = self.num_patches
+            if not self.use_bos_token_in_tf:
+                max_len += 1
             self.trans_decoder = STEVETransformerDecoder(
                 vocab_size=self.vocab_size,
                 d_model=self.dec_dict['dec_d_model'],
+                slot_size=self.slot_size,
                 n_head=self.dec_dict['dec_num_heads'],
+                use_bos_token_in_tf=self.dec_dict["use_bos_token_in_tf"],
+                use_proj_bias=self.dec_dict["use_proj_bias"],
                 max_len=max_len,
                 num_slots=self.num_slots,
                 num_layers=self.dec_dict['dec_num_layers'],
@@ -257,7 +438,7 @@ class STEVE(StoSAVi):
     def forward_decoder(self, in_slots, target_token_id, tokens=None):
         if self.dec_dict['dec_type'] == 'slate':
             h, w = self.h, self.w
-            in_token_id = target_token_id[:, :-1]
+            in_token_id = self.get_input_tokens(target_token_id)
             pred_token_id = self.trans_decoder(in_slots, in_token_id, tokens)[:, -(h * w):]
             return pred_token_id, None
         elif self.dec_dict['dec_type'] == 'mlp':
@@ -269,7 +450,6 @@ class STEVE(StoSAVi):
         B, T = inp.shape[:2]
         if not self.use_dvae_encodings:
             img = inp.flatten(0, 1)
-
             encoder_out = self._get_encoder_out(img)
             encoder_out = encoder_out.unflatten(0, (B, T))
             # `encoder_out` has shape: [B, T, H*W, out_features]
@@ -299,6 +479,7 @@ class STEVE(StoSAVi):
 
             # SA to get `post_slots`
             slots, masks = self.slot_attention(encoder_out[:, idx], latents, slot_inits)
+            # print(masks.shape)
             # print(masks.shape)
             all_slots.append(slots)
             all_masks.append(masks.unflatten(-1, self.visual_resolution))
@@ -370,6 +551,11 @@ class STEVE(StoSAVi):
         cat_dict = {k: torch_cat(v, dim=1) for k, v in cat_dict.items()}
         return cat_dict
     
+    def get_input_tokens(self, tokens):
+        if self.use_bos_token_in_tf:
+            return tokens
+        return tokens[:, :-1]
+    
     def _forward(self, img, img_token_id=None, prev_slots=None):
         """Forward function.
 
@@ -384,7 +570,7 @@ class STEVE(StoSAVi):
             self._reset_rnn()
 
         B, T = img.shape[:2]
-        
+ 
         img_token_id, logits = self.dvae.tokenize(img, return_logits = True, one_hot=False)
         img_token_id = img_token_id.flatten(2,3).detach()
         
@@ -396,14 +582,22 @@ class STEVE(StoSAVi):
         #             img, one_hot=False).flatten(2, 3).detach()
         h, w = self.h, self.w
         target_token_id = img_token_id.flatten(0, 1).long()  # [B*T, h*w]
-        if self.dec_dict['dec_type'] == 'slate': 
-            slots_inp = self.trans_decoder.project_idx(target_token_id[:, :-1]).unflatten(0, (B, T))
-        else:
-            logits = self.encoder_pos_embedding(logits)
-            slots_inp = logits.flatten(2, 3).transpose(1, 2).unflatten(0, (B, T))
+        
+        # if self.dec_dict['dec_type'] == 'slate': 
+        #     slots_inp = self.trans_decoder.project_idx(self.get_input_tokens(target_token_id)).unflatten(0, (B, T))
+        # else:
+        #     logits = self.encoder_pos_embedding(logits)
+        #     slots_inp = logits.flatten(2, 3).transpose(1, 2).unflatten(0, (B, T))
             
         tokens = None
-        # if self.use_dvae_encodings:
+        slots_inp = img
+        if self.use_dvae_encodings:
+
+            if self.dec_dict['dec_type'] == 'slate': 
+                slots_inp = self.trans_decoder.project_idx(self.get_input_tokens(target_token_id)).unflatten(0, (B, T))
+            else:
+                logits = self.encoder_pos_embedding(logits)
+                slots_inp = logits.flatten(2, 3).transpose(1, 2).unflatten(0, (B, T))
             # slots_inp = self.trans_decoder.project_idx(target_token_id[:, :-1]).unflatten(0, (B, T))
         slots, masks, _ = self.encode(slots_inp, prev_slots)
         # `slots` has shape: [B, T, self.num_slots, self.slot_size]

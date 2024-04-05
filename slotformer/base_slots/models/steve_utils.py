@@ -178,3 +178,22 @@ def gru_cell(input_size, hidden_size, bias=True):
         nn.init.zeros_(m.bias_hh)
 
     return m
+
+
+
+class OCRConv2dBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super().__init__()
+        self.m = conv2d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            bias=True,
+            weight_init="kaiming",
+        )
+
+    def forward(self, x):
+        x = self.m(x)
+        return F.relu(x)

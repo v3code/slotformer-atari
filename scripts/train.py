@@ -71,7 +71,7 @@ def main(params):
         use_ddp=args.ddp,
         use_fp16=args.fp16,
     )
-
+    
     method.fit(
         resume_from=args.weight, san_check_val_step=params.san_check_val_step)
 

@@ -314,24 +314,45 @@ class STEVETransformerDecoder(nn.Module):
         max_len,
         num_slots,
         num_layers,
+        slot_size = None,
+        use_proj_bias=True,
+        use_bos_token_in_tf=True,
+        # use_param_bos_token=False,
         dropout=0.1,
     ):
         super().__init__()
-
+        if slot_size is None:
+            slot_size = d_model
         self.max_len = max_len
         self.vocab_size = vocab_size
         self.num_slots = num_slots
 
         # input embedding stem
         # we use (max_len + 1) because of the BOS token
-        self.in_proj = nn.Linear(d_model, d_model)
-        self.tok_emb = nn.Embedding(vocab_size + 1, d_model)
+        
+        embed_size = vocab_size + 1
+        # if use_param_bos_token:
+        #     embed_size += 1
+        
+        self.in_proj = nn.Linear(slot_size, d_model, bias=use_proj_bias)
+        self.tok_emb = nn.Embedding(embed_size, d_model)
         self.pos_emb = PositionalEncoding(max_len + 1, d_model, dropout)
 
+        # self.use_param_bos_token = use_param_bos_token
+        # if self.use_param_bos_token:
+        #     self.bos_token = nn.Parameter(torch.Tensor(1, 1, d_model))
+        #     nn.init.xavier_uniform_(self.bos_token)
+        transformer_len = max_len
+        
+        self.use_bos_token_in_tf = use_bos_token_in_tf
+        
+        if use_bos_token_in_tf:
+            transformer_len += 1
+        
         # TransformerDecoder
         self.tf_dec = TransformerDecoder(
             num_blocks=num_layers,
-            max_len=max_len + 1,
+            max_len=transformer_len,
             d_model=d_model,
             num_heads=n_head,
             dropout=dropout,
@@ -340,7 +361,7 @@ class STEVETransformerDecoder(nn.Module):
         # final idx prediction
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 
-    def forward(self, slots, idx, tokens=None):
+    def forward(self, slots, idx, tokens=None, truncate_tokens=True):
         """Forward pass.
 
         Args:
@@ -362,19 +383,40 @@ class STEVETransformerDecoder(nn.Module):
             # idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
             # token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
             # tokens = self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
+        
+        if not self.use_bos_token_in_tf and truncate_tokens:
+            tokens = tokens[:, :-1]
 
         x = self.tf_dec(tokens, slots)  # [B, 1 + t2, C]
 
         logits = self.head(x)  # [B, 1 + t2, vocab_size]
 
         return logits
-    
+        
     def project_idx(self, idx):
         B, T = idx.shape
         BOS = torch.ones((B, 1)).type_as(idx) * self.vocab_size
         idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
         token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
         return self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
+    
+    # def project_idx_bos_idx(self, idx):
+    #     B, T = idx.shape
+    #     BOS = torch.ones((B, 1)).type_as(idx) * self.vocab_size
+    #     idx = torch.cat([BOS, idx], dim=1)  # [B, 1 + t2]
+    #     token_embeddings = self.tok_emb(idx)  # [B, 1 + t2, C]
+    #     return self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
+    
+    # def project_idx_bos_embed(self, idx):
+    #     B, T = idx.shape
+    #     token_embeddings = self.tok_emb(idx)  # [B, t2, C]
+    #     token_embeddings = torch.cat([self.bos_token.repeat(B, 1, 1), token_embeddings], dim=1) # [B, 1 + t2, C]
+    #     return self.pos_emb(token_embeddings)  # [B, 1 + t2, C]
+    
+    # def project_idx(self, idx):
+    #     if self.use_param_bos_token:
+    #         return self.project_idx_bos_embed(idx)
+    #     return self.project_idx_bos_idx(idx)
 
     def generate(self, slots, steps, sample=False, temperature=1.0):
         """Generate `steps` tokens conditioned on slots."""
@@ -385,7 +427,7 @@ class STEVETransformerDecoder(nn.Module):
         all_logits = []
         for _ in range(steps):
             # predict one step
-            logits = self.forward(slots, idx_cond)
+            logits = self.forward(slots, idx_cond, truncate_tokens=False)
             logits = logits[:, -1]  # [B, vocab_size]
             # we have to do .cpu() to handle large number of tokens
             # luckily `generate` is only used for evaluation

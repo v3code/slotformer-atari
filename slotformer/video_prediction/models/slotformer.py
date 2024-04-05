@@ -65,10 +65,12 @@ class SlotRollouter(Rollouter):
             norm_first=True,
             action_conditioning=False,
             discrete_actions=True,
+            num_actions=12,
             actions_dim=12,
             use_teacher_forcing=False,
             mamba_state=64,
             use_mamba=False,
+            cat_actions=False,
     ):
         super().__init__()
 
@@ -80,13 +82,20 @@ class SlotRollouter(Rollouter):
             self.num_slots = num_slots
         self.history_len = history_len
         
+        self.cat_actions = cat_actions
+        
         self.use_mamba = use_mamba
         
 
-        if action_conditioning and discrete_actions:
-            self.action_embedding = nn.Embedding(actions_dim, d_model)
+        # if action_conditioning and discrete_actions:
+        self.action_embedding = nn.Embedding(num_actions, actions_dim)
+            
+        
+        in_dim = slot_size
+        if cat_actions:
+            slot_size + actions_dim
 
-        self.in_proj = nn.Linear(slot_size, d_model)
+        self.in_proj = nn.Linear(in_dim, d_model)
         self.action_conditioning = action_conditioning
         self.discrete_actions = discrete_actions
 
@@ -130,41 +139,41 @@ class SlotRollouter(Rollouter):
                            ffn_dim=512,
                            mamba_state=64,
                            norm_first=True):
-        if use_mamba:
-            mamba_args = MambaArgs(
-                d_model=d_model,
-                n_layer=num_layers,
-                use_head=False,
-                d_state=mamba_state,
-                expand=4
-            )
-            return Mamba(
-                args=mamba_args
-            )
-        elif self.action_conditioning:
-            dec_layer = nn.TransformerDecoderLayer(
-                d_model=d_model,
-                nhead=num_heads,
-                dim_feedforward=ffn_dim,
-                norm_first=norm_first,
-                batch_first=True,
-            )
-            return nn.TransformerDecoder(
-                decoder_layer=dec_layer,
-                num_layers=num_layers
-            )
+        # if use_mamba:
+        #     mamba_args = MambaArgs(
+        #         d_model=d_model,
+        #         n_layer=num_layers,
+        #         use_head=False,
+        #         d_state=mamba_state,
+        #         expand=4
+        #     )
+        #     return Mamba(
+        #         args=mamba_args
+        #     )
+        # elif self.action_conditioning:
+        #     dec_layer = nn.TransformerDecoderLayer(
+        #         d_model=d_model,
+        #         nhead=num_heads,
+        #         dim_feedforward=ffn_dim,
+        #         norm_first=norm_first,
+        #         batch_first=True,
+        #     )
+        #     return nn.TransformerDecoder(
+        #         decoder_layer=dec_layer,
+        #         num_layers=num_layers
+        #     )
              
-        else:
-            enc_layer = nn.TransformerEncoderLayer(
-                d_model=d_model,
-                nhead=num_heads,
-                dim_feedforward=ffn_dim,
-                norm_first=norm_first,
-                batch_first=True,
-            )
+        # else:
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=num_heads,
+            dim_feedforward=ffn_dim,
+            norm_first=norm_first,
+            batch_first=True,
+        )
 
-            return nn.TransformerEncoder(
-                encoder_layer=enc_layer, num_layers=num_layers)
+        return nn.TransformerEncoder(
+            encoder_layer=enc_layer, num_layers=num_layers)
     
     def _project_emb(self, emb):
         B = emb.shape[0]
@@ -199,7 +208,9 @@ class SlotRollouter(Rollouter):
             actions = actions.long()
             actions = self.action_embedding(actions)
             # in_actions = actions[:, :self.history_len].unsqueeze(2)
-            # x = torch.cat([x, in_actions], dim=2)
+            if self.cat_actions:
+                x = torch.cat([x, actions.unsqueeze(2).repeat(1, 1, self.num_slots, 1)], dim=-1)
+            
         in_x = x.flatten(1, 2)
 
         # temporal_pe repeat for each slot, shouldn't be None

@@ -2,6 +2,8 @@ from typing import Iterable, Union
 import torch
 import torch.nn as nn
 
+from slotformer.base_slots.models.steve_utils import conv2d
+
 
 def get_lr(optimizer):
     """Get the learning rate of current optimizer."""

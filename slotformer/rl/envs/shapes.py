@@ -13,7 +13,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 from matplotlib import pyplot as plt
 
-import envs
+# import envs
 
 
 def get_colors(cmap='Set1', num_colors=9):
